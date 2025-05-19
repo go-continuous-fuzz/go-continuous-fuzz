@@ -1,0 +1,23 @@
+version: "2"
+
+run:
+  go: "1.24.3"
+  timeout: 10m
+
+linters:
+  settings:
+    lll:
+      line-length: 80
+      tab-width: 8
+    errorlint:
+      errorf: true
+    whitespace:
+      multi-func: true
+      multi-if: true
+    staticcheck:
+      checks: ["-SA1019"]
+  enable:
+    - lll
+    - errorlint
+    - whitespace
+    - staticcheck

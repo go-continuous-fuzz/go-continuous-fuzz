@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  format:
+    name: Check Format and Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        id: setup
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24.3"
+
+      - name: Check gofmt
+        run: |
+          fmt_result=$(gofmt -l .)
+          if [ -n "$fmt_result" ]; then
+            echo "The following files need to be formatted:"
+            echo "$fmt_result"
+            exit 1
+          fi
+
+      - name: Check golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.1
+
+  build:
+    name: Build go-continuous-fuzz project
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        id: setup
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24.3"
+
+      - name: Set up Go environment variables
+        run: |
+          echo "export PATH=\$PATH:$(go env GOPATH)/bin" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Build the project
+        run: make build
+
+  unit-test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        id: setup
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24.3"
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: make unit-test
+
+  e2e-test:
+    name: Run E2E Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        id: setup
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24.3"
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run E2E tests
+        run: make e2e-test

@@ -1,0 +1,6 @@
+.env
+
+app
+
+out/
+fuzz_results/

@@ -1,5 +1,5 @@
 # Use an official Go runtime as a parent image.
-FROM golang:1.24.3 AS build
+FROM golang:1.23.9 AS build
 
 # Install necessary tools and dependencies.
 RUN apt-get update && \

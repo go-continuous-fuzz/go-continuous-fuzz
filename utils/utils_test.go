@@ -1,4 +1,4 @@
-package git
+package utils
 
 import (
 	"testing"
@@ -34,7 +34,7 @@ func TestSanitizeURL(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			actualSanitizedURL := sanitizeURL(tc.inputURL)
+			actualSanitizedURL := SanitizeURL(tc.inputURL)
 			assert.Equal(t, tc.expectedSanitizedURL,
 				actualSanitizedURL, "Sanitized URL does not "+
 					"match expected result")

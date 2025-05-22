@@ -33,173 +33,151 @@ var (
 	)
 )
 
-// FuzzProcessor reads a stream of fuzzer output lines, detects failures,
-// writes logs, and captures the failing input for later logging.
-type FuzzProcessor struct {
-	// Logger used to record informational and error messages during
-	// processing.
+// FuzzOutputProcessor handles parsing and logging of fuzzing output streams,
+// detecting failures, and capturing/logging failing input data.
+type FuzzOutputProcessor struct {
+	// Logger for informational and error messages.
 	logger *slog.Logger
 
 	// Configuration settings provided by the user
 	cfg *config.Config
 
-	// Path to the directory where the input failing corpus (if any) is
-	// stored.
-	corpusPath string
+	// Directory containing the fuzzing corpus.
+	corpusDir string
 
-	// Name of the fuzz target being processed.
-	target string
+	// Name of the fuzz target under test.
+	targetName string
 
-	// Interface responsible for writing logs to the desired output.
-	logWriter LogWriter
-
-	// Tracks the state of the processing, including whether a failure was
-	// detected.
-	State *ProcessState
+	// File handle for writing failure logs.
+	logFile *os.File
 }
 
-// ProcessState holds mutable state information while processing fuzzer output.
-type ProcessState struct {
-	// SeenFailure indicates whether a failure marker line has been spotted.
-	SeenFailure bool
+// NewFuzzOutputProcessor constructs a FuzzOutputProcessor for the given logger,
+// config, corpus directory, and fuzz target name.
+func NewFuzzOutputProcessor(logger *slog.Logger, cfg *config.Config,
+	corpusDir string, targetName string) *FuzzOutputProcessor {
 
-	// ErrorData contains the formatted contents of the failing testcase.
-	ErrorData string
-
-	// InputPrinted indicates whether the failing input has already been
-	// captured.
-	InputPrinted bool
-}
-
-// NewFuzzProcessor constructs a FuzzProcessor for the given logger, config,
-// corpus path, and fuzz target name.
-func NewFuzzProcessor(logger *slog.Logger, cfg *config.Config,
-	corpusPath string, target string) *FuzzProcessor {
-
-	return &FuzzProcessor{
+	return &FuzzOutputProcessor{
 		logger:     logger,
 		cfg:        cfg,
-		corpusPath: corpusPath,
-		target:     target,
-		State:      &ProcessState{},
-		logWriter:  &FileLogWriter{},
+		corpusDir:  corpusDir,
+		targetName: targetName,
 	}
 }
 
-// ProcessStream reads each line from the fuzzing output, processes it (logging
-// every line and capturing any failure details), and when complete closes the
-// log writer, flushing any accumulated error data.
-func (fp *FuzzProcessor) ProcessStream(stream io.Reader) {
+// ProcessFuzzStream reads each line from the fuzzing output stream, logs all
+// lines, and captures failure details if a failure is detected. Returns true if
+// a failure was found and processed, false otherwise.
+func (fp *FuzzOutputProcessor) ProcessFuzzStream(stream io.Reader) bool {
 	scanner := bufio.NewScanner(stream)
 
-	// Iterate over each line in the output stream.
-	for scanner.Scan() {
-		// Process the current line to detect any errors or failures.
-		// If an error occurs during processing, log it using the
-		// provided logWriter.
-		if err := fp.processLine(scanner.Text()); err != nil {
-			fp.logger.Error("Error processing line", "error", err)
-		}
+	// Scan until a failure line is found; if not found, return false.
+	if !fp.scanUntilFailure(scanner) {
+		return false
 	}
 
-	// Ensure we flush and close the log writer with the final error data.
-	defer func() { _ = fp.logWriter.Close(fp.State.ErrorData) }()
+	// Process and log failure lines, capturing error data.
+	fp.processFailureLines(scanner)
+
+	return true
 }
 
-// processLine handles one line of fuzz output: it logs it, checks for failure
-// markers, and if in failure mode, writes lines and captures failing input.
-func (fp *FuzzProcessor) processLine(line string) error {
-	fp.logger.Info("Fuzzer output", "message", line)
+// scanUntilFailure scans the output until a failure indicator (--- FAIL:) is
+// found. Returns true if a failure line is detected, false otherwise.
+func (fp *FuzzOutputProcessor) scanUntilFailure(scanner *bufio.Scanner) bool {
+	for scanner.Scan() {
+		line := scanner.Text()
+		fp.logger.Info("Fuzzer output", "message", line)
 
-	// If a failure has not yet been detected, check if this line indicates
-	// a failure.
-	if !fp.State.SeenFailure {
-		if err := fp.handleFailureDetection(line); err != nil {
-			return fmt.Errorf("failure detection failed: %w", err)
+		// Detect the start of a failure section.
+		if strings.Contains(line, "--- FAIL:") {
+			return true
 		}
 	}
+	return false
+}
 
-	// If a failure has been detected, process the line to extract and
-	// record relevant failure information.
-	if fp.State.SeenFailure {
-		// Handle the line in the context of a detected failure.
-		if err := fp.handleFailureLine(line); err != nil {
-			return fmt.Errorf("failure line handling failed: %w",
+// processFailureLines processes lines after a failure is detected, writes them
+// to a log file, and attempts to extract and log the failing input data.
+func (fp *FuzzOutputProcessor) processFailureLines(scanner *bufio.Scanner) {
+	// Construct the log file path for storing failure details.
+	logFileName := fmt.Sprintf("%s_failure.log", fp.targetName)
+	logPath := filepath.Join(fp.cfg.FuzzResultsPath, logFileName)
+
+	// Ensure the results directory exists.
+	if err := utils.EnsureDirExists(fp.cfg.FuzzResultsPath); err != nil {
+		fp.logger.Error("Failed to create fuzz results directory",
+			"error", err)
+		return
+	}
+
+	// Create the log file for writing.
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		fp.logger.Error("Failed to create log file", "error", err)
+		return
+	}
+	fp.logFile = logFile
+
+	// Ensure the log file is closed at the end.
+	defer func() {
+		if err := fp.logFile.Close(); err != nil {
+			fp.logger.Error("Failed to close log file", "error",
 				err)
 		}
-	}
+	}()
 
-	return nil
-}
+	fp.logger.Info("Failure log initialized", "path", logPath)
 
-// handleFailureDetection looks for the first "--- FAIL:" marker. When found,
-// it initializes the failure log file for subsequent lines.
-func (fp *FuzzProcessor) handleFailureDetection(line string) error {
-	// Check if the line contains the failure marker.
-	if strings.Contains(line, "--- FAIL:") {
-		// Mark that a failure has been detected.
-		fp.State.SeenFailure = true
+	var errorData string
 
-		// Construct the log file name and path for storing failure
-		// details.
-		logFileName := fmt.Sprintf("%s_failure.log", fp.target)
-		logPath := filepath.Join(fp.cfg.FuzzResultsPath, logFileName)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fp.logger.Info("Fuzzer output", "message", line)
 
-		// Ensure the FuzzResultsPath directory exists (creates parents
-		// as needed)
-		if err := utils.EnsureDirExists(
-			fp.cfg.FuzzResultsPath); err != nil {
-			return fmt.Errorf("failed to create fuzz result file: "+
-				"%w", err)
+		// Write the current line to the failure log file.
+		_, err = fp.logFile.WriteString(line + "\n")
+		if err != nil {
+			fp.logger.Error("Failed to write log line", "error",
+				err)
+			return
 		}
 
-		// Initialize the log writer with the constructed path.
-		if err := fp.logWriter.Initialize(logPath); err != nil {
-			return fmt.Errorf("log writer initialization failed: "+
-				"%w", err)
+		// If error data has already been captured, skip further
+		// extraction.
+		if errorData != "" {
+			continue
 		}
 
-		fp.logger.Info("Failure log initialized", "path", logPath)
-	}
-	return nil
-}
+		// Parse the line to extract the fuzz target and ID (hex) of the
+		// failing input.
+		// When a fuzz target encounters a failure during f.Add, the
+		// crash is printed, but no input is saved to testdata/fuzz.
+		//
+		// The log output typically appears as:
+		//   failure while testing seed corpus entry: FuzzFoo/seed#0
+		//
+		// As a result, no error data will be printed.
+		target, id := parseFailureLine(line)
+		// If either target or ID is empty, skip further processing.
+		if target == "" || id == "" {
+			continue
+		}
 
-// handleFailureLine writes the line to the log, then on the first occurrence
-// of a failure-input marker extracts the testcase and reads its contents.
-func (fp *FuzzProcessor) handleFailureLine(line string) error {
-	// Log the current line to the failure log file.
-	if err := fp.logWriter.WriteLine(line); err != nil {
-		return fmt.Errorf("failed to write log line: %w", err)
-	}
-
-	// If the failing input has already been printed, no further action is
-	// needed.
-	if fp.State.InputPrinted {
-		return nil
-	}
-
-	// Parse the line to extract the fuzz target and ID (hex) of the failing
-	// input.
-	// When a fuzz target encounters a failure during f.Add, the crash is
-	// printed, but no input is saved to testdata/fuzz.
-	//
-	// The log output typically appears as:
-	//   failure while testing seed corpus entry: FuzzFoo/seed#0
-	//
-	// As a result, no error data will be printed.
-	target, id := parseFailureLine(line)
-	// If either target or ID is empty, skip further processing.
-	if target == "" || id == "" {
-		return nil
+		// Read and store the input data associated with the failing
+		// target and ID.
+		errorData = fp.readFailingInput(target, id)
 	}
 
-	// Read the input data associated with the failing target and ID.
-	errorData := fp.readInputData(target, id)
-
-	// Store the read input data and mark that the input has been printed.
-	fp.State.ErrorData = errorData
-	fp.State.InputPrinted = true
-	return nil
+	// Write the error data (if any) to the log file.
+	if errorData != "" {
+		_, err = fp.logFile.WriteString(errorData + "\n")
+		if err != nil {
+			fp.logger.Error("Failed to write error data", "error",
+				err)
+			return
+		}
+	}
 }
 
 // parseFailureLine attempts to extract the fuzz target name and input ID
@@ -229,16 +207,14 @@ func parseFailureLine(line string) (string, string) {
 	return target, id
 }
 
-// readInputData attempts to read the failing input file from the corpus and
-// returns either its contents or an error placeholder string.
-func (fp *FuzzProcessor) readInputData(target, id string) string {
-	// Construct the relative path to the failing input file.
+// readFailingInput attempts to read the failing input file from the corpus
+// directory.Returns the file contents or a placeholder string if reading fails.
+func (fp *FuzzOutputProcessor) readFailingInput(target, id string) string {
+	// Construct the path to the failing input file.
 	failingInputPath := filepath.Join(target, id)
+	inputPath := filepath.Join(fp.corpusDir, failingInputPath)
 
-	// Build the relativr path to the failing input file within the project.
-	inputPath := filepath.Join(fp.corpusPath, failingInputPath)
-
-	// Attempt to read the content of the input file.
+	// Attempt to read the file contents.
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
 		// If reading fails, return a placeholder string indicating the

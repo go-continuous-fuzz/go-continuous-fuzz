@@ -270,7 +270,7 @@ func executeFuzzTarget(ctx context.Context, logger *slog.Logger, pkg string,
 }
 
 // streamFuzzOutput reads and processes the standard output of a fuzzing
-// process. It utilizes a FuzzProcessor to parse each line of output,
+// process. It utilizes a FuzzOutputProcessor to parse each line of output,
 // identifying any errors or failures that occur during fuzzing. If a failure is
 // detected, it logs the error details and the corresponding failing test case
 // into the log file for analysis. The function signals completion through the
@@ -278,19 +278,19 @@ func executeFuzzTarget(ctx context.Context, logger *slog.Logger, pkg string,
 // fuzzTargetFailingChan channel.
 func streamFuzzOutput(logger *slog.Logger, wg *sync.WaitGroup, r io.Reader,
 	corpusPath string, cfg *config.Config, target string,
-	fuzzTargetFailingChan chan bool) {
+	failureChan chan bool) {
 
 	defer wg.Done()
 
-	// Initialize a new FuzzProcessor to handle and parse the fuzzing output
-	processor := parser.NewFuzzProcessor(logger, cfg, corpusPath, target)
+	// Create a FuzzOutputProcessor to handle parsing and logging of fuzz
+	// output.
+	processor := parser.NewFuzzOutputProcessor(logger, cfg, corpusPath,
+		target)
 
-	// Start processing the output stream from the fuzzing process. This
-	// will parse each line, log relevant information, and detect any
-	// failures
-	processor.ProcessStream(r)
+	// Process the fuzzing output stream. This will log all output, detect
+	// failures, and write failure details to disk if encountered.
+	failureDetected := processor.ProcessFuzzStream(r)
 
-	// Send the result of the failure detection back through the channel
-	// If a failure was seen during processing, this will be true
-	fuzzTargetFailingChan <- processor.State.SeenFailure
+	// Communicate the result (failure detected or not) back to the caller.
+	failureChan <- failureDetected
 }

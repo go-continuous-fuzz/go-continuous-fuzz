@@ -1,6 +1,6 @@
 module github.com/go-continuous-fuzz/go-continuous-fuzz
 
-go 1.24.3
+go 1.23.9
 
 require (
 	github.com/go-git/go-git/v5 v5.16.0

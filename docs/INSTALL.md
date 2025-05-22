@@ -43,7 +43,7 @@ make build
 
 1. Make sure the required environment variables are set.
    For more details, see: [docs/USAGE.md](USAGE.md)
-2. Run the following command to run the go-continuous-fuzz app:
+2. Run the following command to run the go-continuous-fuzz project:
 
 ```sh
 make run
@@ -51,7 +51,7 @@ make run
 
 ### Step 6: Run the go-continuous-fuzz project in docker
 
-1. Run the following command to run the Continuous-Fuzz app in docker container:
+1. Run the following command to run the go-continuous-fuzz project in docker container:
 
 ```sh
 make docker-run-file ENV_FILE=<required> VOLUME_MOUNTS=<optional>

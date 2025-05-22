@@ -70,7 +70,7 @@ func RunFuzzingCycles(ctx context.Context, logger *slog.Logger, cfg *config.
 }
 
 // runFuzzingWorker executes the fuzzing work until the cycle context is
-// canceled. It repeatedly calls the main fuzzing function from the app package.
+// canceled. It calls the main fuzzing function from the worker package.
 func runFuzzingWorker(ctx context.Context, logger *slog.Logger, cfg *config.
 	Config, doneChan chan struct{}) {
 

@@ -1,6 +1,6 @@
 .env
 
-app
+go-continuous-fuzz
 
 out/
 fuzz_results/

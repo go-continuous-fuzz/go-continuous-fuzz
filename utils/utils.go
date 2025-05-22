@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -100,4 +101,24 @@ func EnsureDirExists(dirPath string) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 	return nil
+}
+
+// SanitizeURL parses the given raw URL string and returns a sanitized version
+// in which any user credentials (e.g., a GitHub Personal Access Token) are
+// replaced with a placeholder ("*****"). This ensures that sensitive
+// information is not exposed in logs or output. If the URL cannot be parsed,
+// the original URL is returned.
+func SanitizeURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		// If URL parsing fails, return the original URL.
+		return rawURL
+	}
+
+	// Remove user info (username and password) if present.
+	if parsed.User != nil {
+		parsed.User = url.User("*****")
+	}
+
+	return parsed.String()
 }

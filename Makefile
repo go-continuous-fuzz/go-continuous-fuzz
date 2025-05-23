@@ -5,21 +5,19 @@ DOCKER_APP_NAME := go-continuous-fuzz
 
 #? build: Build the project and create app binary
 build:
-	@echo "Building $(APP_NAME)..."
-	go build -o $(APP_NAME) $(SRC)
+	@go build -o $(APP_NAME) $(SRC)
 
-#? run: Run the application
+#? run: Run the application with command-line flags set in ARGS or ENV variables specified in the process environment
 run: build
-	@echo "Running $(APP_NAME)..."
-	./$(APP_NAME)
+	@./$(APP_NAME) $(ARGS)
 
 #? run-help: Show this help message
 run-help: build
-	./$(APP_NAME) help
+	@./$(APP_NAME) --help
 
 #? docker: Build the docker image of go-continuous-fuzz project
 docker:
-	docker build -t $(DOCKER_APP_NAME) .
+	@docker build -t $(DOCKER_APP_NAME) .
 
 #? docker-run-file: Run the go-continuous-fuzz container, loading every variable from $(ENV_FILE).
 docker-run-file: docker

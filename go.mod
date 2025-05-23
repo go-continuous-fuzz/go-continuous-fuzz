@@ -4,7 +4,7 @@ go 1.23.9
 
 require (
 	github.com/go-git/go-git/v5 v5.16.0
-	github.com/joho/godotenv v1.5.1
+	github.com/jessevdk/go-flags v1.6.1
 	github.com/otiai10/copy v1.14.1
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/sync v0.14.0

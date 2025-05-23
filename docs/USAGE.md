@@ -1,44 +1,27 @@
 # Usage: go-continuous-fuzz
 
-## Environment Variables
+## Configuration Options
 
-Configure **go-continuous-fuzz** by creating a `.env` file in the project root and setting the following variables, Alternatively, these variables can be set directly in the process environment:
+You can configure **go-continuous-fuzz** using either environment variables or command-line flags. All options are listed below:
 
-- **FUZZ_NUM_PROCESSES**  
-  Specifies the number of fuzzing processes to run concurrently.  
-  _Default_: Maximum number of CPU cores available on the machine.
+| Environment Variable | Command-line Flag     | Description                                 | Required | Default |
+| -------------------- | --------------------- | ------------------------------------------- | -------- | ------- |
+| `FUZZ_NUM_PROCESSES` | `--num_processes`     | Number of concurrent fuzzing processes      | No       | 1       |
+| `PROJECT_SRC_PATH`   | `--project_src_path`  | Git repo URL of the project to fuzz         | Yes      | —       |
+| `GIT_STORAGE_REPO`   | `--git_storage_repo`  | Git repo where the input corpus is stored   | Yes      | —       |
+| `FUZZ_TIME`          | `--fuzz_time`         | Duration for fuzzing run                    | No       | 120s    |
+| `FUZZ_PKG`           | `--fuzz_pkg`          | Comma-separated list of Go packages to fuzz | Yes      | —       |
+| `FUZZ_RESULTS_PATH`  | `--fuzz_results_path` | Path to store fuzzing results               | Yes      | —       |
 
-- **PROJECT_SRC_PATH** (_Required_)  
-  The Git repository URL of the project to be fuzzed. Use one of the following formats:
+**Repository URL formats:**
 
-  - For private repositories:  
-    `https://oauth2:PAT@github.com/OWNER/REPO.git`
-  - For public repositories:  
-    `https://github.com/OWNER/REPO.git`
-
-- **GIT_STORAGE_REPO** (_Required_)  
-  The Git repository where the input corpus is stored. Use one of the following formats:
-
-  - For private repositories:  
-    `https://oauth2:PAT@github.com/OWNER/REPO.git`
-  - For public repositories:  
-    `https://github.com/OWNER/REPO.git`
-
-- **FUZZ_TIME**  
-  The duration (in seconds) for which the fuzzing engine should run.  
-  _Default_: 120 Seconds.
-
-- **FUZZ_PKG** (_Required_)
-  The specific Go package within the repository that will be fuzzed.
-
-- **FUZZ_RESULTS_PATH**
-  Path to store fuzzing results, relative to the current working directory
-  _Default_: Current working directory
+- Private: `https://oauth2:PAT@github.com/OWNER/REPO.git`
+- Public: `https://github.com/OWNER/REPO.git`
 
 ## How It Works
 
 1. **Configuration:**  
-   Set the required environment variables in `.env` file or directly in the process environment to configure the fuzzing process.
+   Set the required environment variables or pass the corresponding flags to configure the fuzzing process.
 
 2. **Fuzz Target Detection:**  
    The tool automatically detects all available fuzz targets in the provided project repository.
@@ -51,29 +34,50 @@ Configure **go-continuous-fuzz** by creating a `.env` file in the project root a
 
 ## Running go-continuous-fuzz
 
-1. **Clone or Download repo:**
+1. **Clone the Repository**
 
    ```bash
    git clone github.com/go-continuous-fuzz/go-continuous-fuzz.git
    cd go-continuous-fuzz
    ```
 
-2. **Set Environment Variables:**  
-   You can export the necessary environment variables in `.env` file:
+2. **Set Configuration paramaters**  
+   You can use environment variables:
 
    ```bash
    export FUZZ_NUM_PROCESSES=<number_of_processes>
    export PROJECT_SRC_PATH=<project_repo_url>
    export GIT_STORAGE_REPO=<storage_repo_url>
-   export FUZZ_TIME=<time_in_seconds>
+   export FUZZ_TIME=<time>
    export FUZZ_PKG=<target_package>
    export FUZZ_RESULTS_PATH=<path/to/file>
    ```
 
+   Or pass flags directly:
+
+   ```bash
+     --project_src_path=<project_repo_url>
+     --git_storage_repo=<storage_repo_url>
+     --fuzz_results_path=<path/to/file>
+     --fuzz_pkg=<target_package>
+     --fuzz_time=<time>
+     --num_processes=<number_of_processes>
+   ```
+
 3. **Run the Fuzzing Engine:**  
    With your environment configured, start the fuzzing process. Run:
+
    ```bash
    make run
    ```
 
-See [INSTALL.md](./INSTALL.md) for other ways to run the go-continuous-fuzz project.
+   Or pass flags directly:
+
+   ```bash
+   make run ARGS=<flags>
+   ```
+
+## Additional Information
+
+- You can mix environment variables and command-line flags; flags take precedence.
+- For more advanced usage, including Docker integration and running tests, see [INSTALL.md](./INSTALL.md).

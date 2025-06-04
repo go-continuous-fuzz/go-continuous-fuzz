@@ -41,33 +41,30 @@ make build
 
 ### Step 5: Run the go-continuous-fuzz project
 
-1. Make sure the required environment variables are set.
-   For more details, see: [docs/USAGE.md](USAGE.md)
-2. Run the following command to run the go-continuous-fuzz project:
+1. Make sure the required configuration variables are set in the config file.
+   Run the following command to run the go-continuous-fuzz project:
 
 ```sh
 make run
 ```
 
-### Step 6: Run the go-continuous-fuzz project in docker
-
-1. Run the following command to run the go-continuous-fuzz project in docker container:
-
-```sh
-make docker-run-file ENV_FILE=<required> VOLUME_MOUNTS=<optional>
-```
-
 OR
 
+2. You can pass the configurations as command-line flags instead of specifying them in the config file.
+   Run the following command to run the go-continuous-fuzz project:
+
 ```sh
-make docker-run-env \
-  FUZZ_NUM_PROCESSES=<optional> \
-  PROJECT_SRC_PATH=<required> \
-  GIT_STORAGE_REPO=<required> \
-  FUZZ_TIME=<optional> \
-  FUZZ_PKG=<required> \
-  FUZZ_RESULTS_PATH=<optional> \
-  VOLUME_MOUNTS=<optional>
+make run ARGS=<flags>
+```
+
+For more details, see: [docs/USAGE.md](USAGE.md)
+
+### Step 6: Run the go-continuous-fuzz project in docker
+
+1. Run the following command to run the go-continuous-fuzz project in docker container, loading config file through $(VOLUME_MOUNTS):
+
+```sh
+make docker-run VOLUME_MOUNTS=<required>
 ```
 
 ### Step 7: Run the Test Cases

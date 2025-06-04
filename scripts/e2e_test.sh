@@ -2,14 +2,20 @@
 
 set -x
 
-# Specify the environment variables for the fuzzing process
-export PROJECT_SRC_PATH="https://github.com/lightningnetwork/lnd.git"
-export GIT_STORAGE_REPO="https://github.com/lightninglabs/lnd-fuzz.git"
-export FUZZ_TIME="1700"
-export FUZZ_PKG="macaroons routing watchtower/wtclient watchtower/wtwire zpay32"
+# Specify the command-line flags for the fuzzing process
+ARGS="\
+--project.src-repo=https://github.com/lightningnetwork/lnd.git \
+--project.storage-repo=https://github.com/lightninglabs/lnd-fuzz.git \
+--fuzz.time=1700s \
+--fuzz.results-path=~/fuzz_results \
+--fuzz.pkgs-path=macaroons \
+--fuzz.pkgs-path=routing \
+--fuzz.pkgs-path=watchtower/wtclient \
+--fuzz.pkgs-path=watchtower/wtwire \
+--fuzz.pkgs-path=zpay32"
 
 # Run the make command with a 30-minute timeout
-timeout -s INT --preserve-status 30m make run
+timeout -s INT --preserve-status 30m make run ARGS="$ARGS"
 EXIT_STATUS=$?
 
 # If make run failed (not timeout and SIGINT), exit with error
@@ -18,13 +24,13 @@ if [ $EXIT_STATUS -ne 0 ] && [ $EXIT_STATUS -ne 130 ]; then
   exit $EXIT_STATUS
 fi
 
-# Check if the ./fuzz_results directory exists
-if [ -d "./fuzz_results" ]; then
+# Check if the $HOME/fuzz_results directory exists
+if [ -d "$HOME/fuzz_results" ]; then
   echo "✅ Fuzzing process completed successfully."
 else
   echo "❌ Fuzzing process failed."
   exit 1
 fi
 
-# Cleanup: Delete the ./fuzz_results directory
-rm -rf ./fuzz_results
+# Cleanup: Delete the $HOME/fuzz_results directory
+rm -rf "$HOME/fuzz_results"

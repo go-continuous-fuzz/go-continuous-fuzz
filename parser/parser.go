@@ -99,10 +99,10 @@ func (fp *FuzzOutputProcessor) scanUntilFailure(scanner *bufio.Scanner) bool {
 func (fp *FuzzOutputProcessor) processFailureLines(scanner *bufio.Scanner) {
 	// Construct the log file path for storing failure details.
 	logFileName := fmt.Sprintf("%s_failure.log", fp.targetName)
-	logPath := filepath.Join(fp.cfg.FuzzResultsPath, logFileName)
+	logPath := filepath.Join(fp.cfg.Fuzz.ResultsPath, logFileName)
 
 	// Ensure the results directory exists.
-	if err := utils.EnsureDirExists(fp.cfg.FuzzResultsPath); err != nil {
+	if err := utils.EnsureDirExists(fp.cfg.Fuzz.ResultsPath); err != nil {
 		fp.logger.Error("Failed to create fuzz results directory",
 			"error", err)
 		return

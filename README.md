@@ -8,12 +8,12 @@ go-continuous-fuzz is a Go native fuzzing tool that automatically detects and ru
 
 - **Automatic Fuzz Target Detection:** Scans the repository and identifies all available fuzz targets.
 - **Concurrent Fuzzing:** Runs multiple fuzzing processes concurrently, with the default set to the number of available CPU cores.
-- **Customizable Execution:** Configure the duration and target package for fuzzing with environment variables.
+- **Customizable Execution:** Configure the duration and target package for fuzzing with config variables.
 - **Corpus Persistence:** Saves the input corpus for each fuzz target to a specified local directory, ensuring that the test cases are preserved for future runs.
 
 ## Deployment & Execution
 
-go-continuous-fuzz can be deployed as a long-running service on any cloud instance (e.g., AWS EC2, GCP Compute Engine, or DigitalOcean Droplet). Once initiated, the application autonomously manages its execution cycles, running continuously and restarting the fuzzing process at intervals defined by the `FUZZ_TIME` environment variable.
+go-continuous-fuzz can be deployed as a long-running service on any cloud instance (e.g., AWS EC2, GCP Compute Engine, or DigitalOcean Droplet). Once initiated, the application autonomously manages its execution cycles, running continuously and restarting the fuzzing process at intervals defined in the configuration file or via command-line flags.
 
 ## For more information, see:
 

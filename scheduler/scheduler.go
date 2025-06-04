@@ -15,7 +15,7 @@ import (
 // cleanup after each cycle before starting a new one. The cycles run
 // indefinitely until the parent context is canceled.
 func RunFuzzingCycles(ctx context.Context, logger *slog.Logger, cfg *config.
-	Config, cycleDuration time.Duration) {
+	Config) {
 
 	for {
 		// Check if the overall application context has been canceled.
@@ -40,7 +40,7 @@ func RunFuzzingCycles(ctx context.Context, logger *slog.Logger, cfg *config.
 		// Wait for either the cycle duration to elapse or the overall
 		// context to cancel.
 		select {
-		case <-time.After(cycleDuration):
+		case <-time.After(cfg.Fuzz.Time):
 			logger.Info("Cycle duration complete; initiating " +
 				"cleanup.")
 

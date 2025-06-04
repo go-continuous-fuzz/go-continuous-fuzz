@@ -29,7 +29,7 @@ func RunFuzzing(ctx context.Context, logger *slog.Logger,
 	g, goCtx := errgroup.WithContext(ctx)
 
 	// Loop over each package the user requested fuzzing for.
-	for _, pkg := range cfg.FuzzPkgs {
+	for _, pkg := range cfg.Fuzz.PkgsPath {
 		pkg := pkg // capture loop variable
 
 		// Run fuzzing for each package in a separate goroutine.
@@ -192,8 +192,8 @@ func executeFuzzTarget(ctx context.Context, logger *slog.Logger, pkg string,
 		"test",
 		fmt.Sprintf("-fuzz=^%s$", target),
 		fmt.Sprintf("-test.fuzzcachedir=%s", corpusPath),
-		fmt.Sprintf("-fuzztime=%s", cfg.FuzzTime),
-		fmt.Sprintf("-parallel=%d", cfg.NumProcesses),
+		fmt.Sprintf("-fuzztime=%s", cfg.Fuzz.Time),
+		fmt.Sprintf("-parallel=%d", cfg.Fuzz.NumProcesses),
 	}
 
 	// Initialize the 'go test' command with the specified arguments and

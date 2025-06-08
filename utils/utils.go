@@ -11,44 +11,6 @@ import (
 	"github.com/otiai10/copy"
 )
 
-const HelpText = `Usage: go run main.go [command]
-
-Commands:
-  help      Show this help message and exit.
-
-Environment Variables:
-  FUZZ_NUM_PROCESSES
-          Specifies the number of fuzzing processes to run concurrently.
-          Default: Maximum number of CPU cores available on the machine.
-
-  PROJECT_SRC_PATH    (Required)
-          The Git repository URL of the project to be fuzzed.
-          Formats:
-            - Private: https://oauth2:PAT@github.com/OWNER/REPO.git
-            - Public:  https://github.com/OWNER/REPO.git
-
-  GIT_STORAGE_REPO    (Required)
-          The Git repository where the input corpus is stored.
-          Format: https://oauth2:PAT@github.com/OWNER/STORAGEREPO.git
-
-  FUZZ_TIME
-          Duration (in seconds) for which the fuzzing engine should run.
-          Default: 120 seconds.
-
-  FUZZ_PKG   (Required)
-          The specific Go package within the repository to be fuzzed.
-
-  FUZZ_RESULTS_PATH
-          Path to store fuzzing results, relative to the current working
-	  directory
-          Default: Project root directory
-
-Usage Example:
-  Set the necessary environment variables, then start fuzzing:
-      go run main.go
-
-For more information, please refer to the project documentation.`
-
 // CleanupWorkspace deletes the "out" directory to reset the workspace state.
 // Any errors encountered during removal are logged, but do not stop execution.
 func CleanupWorkspace(logger *slog.Logger) {
@@ -73,7 +35,7 @@ func SaveFuzzCorpus(logger *slog.Logger, cfg *config.Config, pkg,
 
 	// Ensure the FuzzResultsPath directory exists (creates parents as
 	// needed)
-	fuzzResultsPath := filepath.Join(cfg.FuzzResultsPath, pkg, "testdata",
+	fuzzResultsPath := filepath.Join(cfg.Fuzz.ResultsPath, pkg, "testdata",
 		"fuzz", target)
 	if err := EnsureDirExists(fuzzResultsPath); err != nil {
 		logger.Error("failed to create fuzz results directory", "error",

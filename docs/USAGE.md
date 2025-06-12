@@ -4,14 +4,14 @@
 
 You can configure **go-continuous-fuzz** using either conifg file or command-line flags. All options are listed below:
 
-| Configuration Variable | Description                                   | Required | Default |
-| ---------------------- | --------------------------------------------- | -------- | ------- |
-| `project.src-repo`     | Git repo URL of the project to fuzz           | Yes      | —       |
-| `project.storage-repo` | Git repo URL where the input corpus is stored | Yes      | —       |
-| `fuzz.results-path`    | Path to store fuzzing results                 | Yes      | —       |
-| `fuzz.pkgs-path`       | List of package paths to fuzz                 | Yes      | —       |
-| `fuzz.time`            | Duration between consecutive fuzzing cycles   | No       | 120s    |
-| `fuzz.num-processes`   | Number of concurrent fuzzing processes        | No       | 1       |
+| Configuration Variable | Description                                            | Required | Default |
+| ---------------------- | -------------------------------------------------------| -------- | ------- |
+| `project.src-repo`     | Git repo URL of the project to fuzz                    | Yes      | —       |
+| `project.corpus-path`  | Absolute path to directory where seed corpus is stored | Yes      | —       |
+| `fuzz.results-path`    | Path to store fuzzing results                          | Yes      | —       |
+| `fuzz.pkgs-path`       | List of package paths to fuzz                          | Yes      | —       |
+| `fuzz.time`            | Duration between consecutive fuzzing cycles            | No       | 120s    |
+| `fuzz.num-processes`   | Number of concurrent fuzzing processes                 | No       | 1       |
 
 **Repository URL formats:**
 
@@ -49,7 +49,7 @@ You can configure **go-continuous-fuzz** using either conifg file or command-lin
 
    ```bash
      --project.src-repo=<project_repo_url>
-     --project.storage-repo=<storage_repo_url>
+     --project.corpus-path=<path/to/file>
      --fuzz.results-path=<path/to/file>
      --fuzz.pkgs-path=<path/to/pkg>
      --fuzz.time=<time>

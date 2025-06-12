@@ -4,9 +4,8 @@ go 1.23.9
 
 require (
 	github.com/btcsuite/btcd/btcutil v1.1.6
-	github.com/go-git/go-git/v5 v5.16.0
+	github.com/go-git/go-git/v5 v5.16.1
 	github.com/jessevdk/go-flags v1.6.1
-	github.com/otiai10/copy v1.14.1
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/sync v0.14.0
 )
@@ -28,7 +27,6 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
-	github.com/otiai10/mint v1.6.3 // indirect
 	github.com/pjbgf/sha1cd v0.3.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect

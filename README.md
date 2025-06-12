@@ -7,7 +7,7 @@ go-continuous-fuzz is a Go native fuzzing tool that automatically detects and ru
 ## Features
 
 - **Automatic Fuzz Target Detection:** Scans the repository and identifies all available fuzz targets.
-- **Concurrent Fuzzing:** Runs multiple fuzzing processes concurrently, with the default set to the number of available CPU cores.
+- **Concurrent Fuzzing:** Runs multiple fuzzing processes concurrently, with the default set to one CPU core.
 - **Customizable Execution:** Configure the duration and target package for fuzzing with config variables.
 - **Corpus Persistence:** Saves the input corpus for each fuzz target to a specified local directory, ensuring that the test cases are preserved for future runs.
 

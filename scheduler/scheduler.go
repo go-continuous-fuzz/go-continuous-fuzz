@@ -50,7 +50,7 @@ func RunFuzzingCycles(ctx context.Context, logger *slog.Logger, cfg *config.
 			// wait before the fuzzing worker is closed before
 			// cleanup.
 			<-doneChan
-			utils.CleanupWorkspace(logger)
+			utils.CleanupWorkspace(logger, cfg)
 
 		case <-ctx.Done():
 			logger.Info("Shutdown initiated during fuzzing " +
@@ -62,7 +62,7 @@ func RunFuzzingCycles(ctx context.Context, logger *slog.Logger, cfg *config.
 			// wait before the fuzzing worker is closed before
 			// cleanup.
 			<-doneChan
-			utils.CleanupWorkspace(logger)
+			utils.CleanupWorkspace(logger, cfg)
 
 			return
 		}

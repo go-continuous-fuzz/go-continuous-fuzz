@@ -5,13 +5,13 @@
 You can configure **go-continuous-fuzz** using either conifg file or command-line flags. All options are listed below:
 
 | Configuration Variable | Description                                            | Required | Default |
-| ---------------------- | -------------------------------------------------------| -------- | ------- |
+| ---------------------- | ------------------------------------------------------ | -------- | ------- |
 | `project.src-repo`     | Git repo URL of the project to fuzz                    | Yes      | —       |
 | `project.corpus-path`  | Absolute path to directory where seed corpus is stored | Yes      | —       |
 | `fuzz.results-path`    | Path to store fuzzing results                          | Yes      | —       |
 | `fuzz.pkgs-path`       | List of package paths to fuzz                          | Yes      | —       |
-| `fuzz.time`            | Duration between consecutive fuzzing cycles            | No       | 120s    |
-| `fuzz.num-processes`   | Number of concurrent fuzzing processes                 | No       | 1       |
+| `fuzz.sync-frequency`  | Duration between consecutive fuzzing cycles            | No       | 120s    |
+| `fuzz.num-workers`     | Number of concurrent fuzzing workers                   | No       | 1       |
 
 **Repository URL formats:**
 
@@ -27,7 +27,7 @@ You can configure **go-continuous-fuzz** using either conifg file or command-lin
    The tool automatically detects all available fuzz targets in the provided project repository.
 
 3. **Fuzzing Execution:**  
-   Go's native fuzzing is executed on each detected fuzz target. The number of concurrent fuzzing processes is controlled by the `fuzz.num-processes` variable.
+   Go's native fuzzing is executed on each detected fuzz target. The number of concurrent fuzzing workers is controlled by the `fuzz.num-workers` variable.
 
 4. **Corpus Persistence:**  
    For each fuzz target, the fuzzing engine generates an input corpus. Depending on the `fuzz.results-path` setting, this corpus is saved to the specified directory, ensuring that the test inputs are preserved and can be reused in future runs.
@@ -52,8 +52,8 @@ You can configure **go-continuous-fuzz** using either conifg file or command-lin
      --project.corpus-path=<path/to/file>
      --fuzz.results-path=<path/to/file>
      --fuzz.pkgs-path=<path/to/pkg>
-     --fuzz.time=<time>
-     --fuzz.num-processes=<number_of_processes>
+     --fuzz.sync-frequency=<time>
+     --fuzz.num-workers=<number_of_workers>
    ```
 
 3. **Run the Fuzzing Engine:**  

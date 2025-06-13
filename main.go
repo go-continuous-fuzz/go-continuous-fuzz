@@ -50,7 +50,7 @@ func main() {
 	}()
 
 	// Start the continuous fuzzing cycles.
-	scheduler.RunFuzzingCycles(appCtx, logger, cfg)
+	scheduler.StartFuzzCycles(appCtx, logger, cfg)
 
 	logger.Info("Program exited.")
 }

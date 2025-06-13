@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-continuous-fuzz/go-continuous-fuzz/config"
 )
@@ -51,4 +52,13 @@ func SanitizeURL(rawURL string) string {
 	}
 
 	return parsed.String()
+}
+
+// CalculateFuzzSeconds calculate per-target fuzz duration:
+// (SyncFrequency * NumWorkers) / totalTargets.
+func CalculateFuzzSeconds(syncFrequency time.Duration, numWorkers int,
+	totalTargets int) float64 {
+
+	return syncFrequency.Seconds() * float64(numWorkers) /
+		float64(totalTargets)
 }

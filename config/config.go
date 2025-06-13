@@ -64,9 +64,9 @@ type Fuzz struct {
 
 	PkgsPath []string `long:"pkgs-path" description:"List of package paths to fuzz" required:"true"`
 
-	Time time.Duration `long:"time" description:"Duration between consecutive fuzzing cycles" default:"120s"`
+	SyncFrequency time.Duration `long:"sync-frequency" description:"Duration between consecutive fuzzing cycles" default:"120s"`
 
-	NumProcesses int `long:"num-processes" description:"Number of concurrent fuzzing processes" default:"1"`
+	NumWorkers int `long:"num-workers" description:"Number of concurrent fuzzing workers" default:"1"`
 }
 
 // Config encapsulates all top-level configuration parameters required to run
@@ -112,12 +112,12 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
-	// Validate the number of processes to ensure it is within the allowed
+	// Validate the number of workers to ensure it is within the allowed
 	// range.
 	maxProcs := runtime.NumCPU()
-	if cfg.Fuzz.NumProcesses <= 0 || cfg.Fuzz.NumProcesses > maxProcs {
-		return nil, fmt.Errorf("invalid number of processes: %d, "+
-			"allowed range is [1, %d]", cfg.Fuzz.NumProcesses,
+	if cfg.Fuzz.NumWorkers <= 0 || cfg.Fuzz.NumWorkers > maxProcs {
+		return nil, fmt.Errorf("invalid number of workers: %d, "+
+			"allowed range is [1, %d]", cfg.Fuzz.NumWorkers,
 			runtime.NumCPU())
 	}
 

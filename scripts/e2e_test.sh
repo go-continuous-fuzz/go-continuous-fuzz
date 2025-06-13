@@ -19,8 +19,9 @@ readonly FUZZ_RESULTS_PATH="${TEST_WORKDIR}/fuzz_results"
 ARGS="\
 --project.src-repo=${PROJECT_SRC_PATH} \
 --project.corpus-path=${CORPUS_DIR_PATH} \
---fuzz.time=${FUZZ_TIME} \
+--fuzz.sync-frequency=${FUZZ_TIME} \
 --fuzz.results-path=${FUZZ_RESULTS_PATH} \
+--fuzz.num-workers=3 \
 --fuzz.pkgs-path=parser \
 --fuzz.pkgs-path=stringutils"
 
@@ -92,7 +93,7 @@ git clone "${PROJECT_SRC_PATH}" "${PROJECT_DIR}"
 # Download and extract only the seed_corpus directory from the project tarball
 echo "Downloading seed corpus..."
 mkdir -p ${CORPUS_DIR_PATH}
-curl -L https://codeload.github.com/go-continuous-fuzz/go-fuzzing-example/tar.gz/main | \
+curl -L https://codeload.github.com/go-continuous-fuzz/go-fuzzing-example/tar.gz/main |
   tar -xz --strip-components=2 -C ${CORPUS_DIR_PATH} go-fuzzing-example-main/seed_corpus
 
 # Initialize data stores
@@ -130,9 +131,15 @@ fi
 # List of required patterns to check in the log
 readonly REQUIRED_PATTERNS=(
   'Cycle duration complete; initiating cleanup.'
+  'msg="Re-enqueuing task" package=stringutils target=FuzzReverseString'
+  'msg="Re-enqueuing task" package=parser target=FuzzEvalExpr'
   'Fuzzing completed successfully'
   'gathering baseline coverage'
   'Shutdown initiated during fuzzing cycle; performing final cleanup.'
+  'msg="Worker starting fuzz target" workerID=1'
+  'msg="Worker starting fuzz target" workerID=2'
+  'msg="Worker starting fuzz target" workerID=3'
+  'msg="Per-target fuzz timeout calculated" duration=2m15s'
 )
 
 # Verify that worker logs contain expected entries
@@ -140,6 +147,23 @@ echo "Verifying worker log entries in ${MAKE_LOG}..."
 for pattern in "${REQUIRED_PATTERNS[@]}"; do
   if ! grep -q -- "${pattern}" "${MAKE_LOG}"; then
     echo "❌ ERROR: Missing expected log entry: ${pattern}"
+    exit 1
+  fi
+done
+
+# List of patterns that should NOT be present in the log
+readonly FORBIDDEN_PATTERNS=(
+  'msg="Worker starting fuzz target" workerID=4'
+  'msg="Re-enqueuing task" package=stringutils target=FuzzUnSafeReverseString'
+  'msg="Re-enqueuing task" package=parser target=FuzzParseComplex'
+  'All workers completed early; cleaning up cycle'
+)
+
+# Verify that worker logs do not contain forbidden entries
+echo "Verifying absence of forbidden log entries in ${MAKE_LOG}..."
+for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+  if grep -q -- "${pattern}" "${MAKE_LOG}"; then
+    echo "❌ ERROR: Unexpected log entry found: ${pattern}"
     exit 1
   fi
 done

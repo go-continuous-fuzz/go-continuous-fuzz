@@ -20,15 +20,13 @@ var (
 	// input ID.
 	//
 	// It matches lines like:
-	//   "failure while testing seed corpus entry: FuzzFoo/771e938e4458e983"
 	//   "Failing input written to testdata/fuzz/FuzzFoo/771e938e4458e983"
 	//
 	// Captured groups:
 	//   - "target": the fuzz target name (e.g., "FuzzFoo")
 	//   - "id": the hexadecimal input ID (e.g., "771e938e4458e983")
 	fuzzFailureRegex = regexp.MustCompile(
-		`(?:failure while testing seed corpus entry:\s*|Failing ` +
-			`input written to\s*testdata/fuzz/)` +
+		`Failing input written to testdata/fuzz/` +
 			`(?P<target>[^/]+)/(?P<id>[0-9a-f]+)`,
 	)
 )
@@ -165,14 +163,24 @@ func (fp *FuzzOutputProcessor) processFailureLines(scanner *bufio.Scanner) {
 		failingInputString = fp.readFailingInput(target, id)
 	}
 
-	// Write the error data (if any) to the log file.
-	if failingInputString != "" {
-		_, err = logFile.WriteString(failingInputString + "\n")
-		if err != nil {
-			fp.logger.Error("Failed to write error data", "error",
-				err)
-			return
-		}
+	// If a crash occurs but we cannot obtain the failing input, it likely
+	// stems from a seed corpus entry added via f.Add. In that case, report
+	// that the failure happened while testing the seed corpus.
+	if failingInputString == "" {
+		failingInputString = fmt.Sprintf(
+			"\n\n=== Failing Testcase ===\n" +
+				"Failure occurred while testing the seed " +
+				"corpus; please check the entries added via " +
+				"f.Add.",
+		)
+	}
+
+	// Write the error data to the log file.
+	_, err = logFile.WriteString(failingInputString + "\n")
+	if err != nil {
+		fp.logger.Error("Failed to write error data", "error",
+			err)
+		return
 	}
 }
 

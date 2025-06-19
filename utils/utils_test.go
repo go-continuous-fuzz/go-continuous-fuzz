@@ -2,6 +2,7 @@ package utils
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -40,4 +41,28 @@ func TestSanitizeURL(t *testing.T) {
 					"match expected result")
 		})
 	}
+}
+
+// TestCalculateFuzzSeconds verifies that CalculateFuzzSeconds correctly
+// computes the per-target fuzz duration given a sync frequency, number of
+// parallel workers, and total number of fuzz targets.
+func TestCalculateFuzzSeconds(t *testing.T) {
+	// Define the number of parallel workers and total targets.
+	totalWorkers := 7
+	totalTargets := 43
+
+	// Compute the expected per-target fuzz duration.
+	expectedDuration, err := time.ParseDuration("31m7s")
+	assert.NoError(t, err, "failed to parse expectedDuration")
+
+	// Parse a sample total fuzz time.
+	syncFrequency, err := time.ParseDuration("3h37m53s")
+	assert.NoError(t, err, "failed to parse syncFrequency")
+
+	actualDuration := CalculateFuzzSeconds(syncFrequency, totalWorkers,
+		totalTargets)
+
+	assert.Equal(t, expectedDuration, actualDuration,
+		"calculated fuzz duration does not match expected value",
+	)
 }

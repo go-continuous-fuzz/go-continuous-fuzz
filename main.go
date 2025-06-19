@@ -11,13 +11,21 @@ import (
 
 	"github.com/go-continuous-fuzz/go-continuous-fuzz/config"
 	"github.com/go-continuous-fuzz/go-continuous-fuzz/scheduler"
+	"github.com/go-continuous-fuzz/go-continuous-fuzz/utils"
 	flags "github.com/jessevdk/go-flags"
 )
 
-// main is the entry point of the application. It sets up signal handling for
-// graceful shutdown, loads configuration, and starts the continuous fuzzing
-// cycles.
+// main is the entry point of the application.
+// It runs the main logic and exits with the appropriate status code.
 func main() {
+	// Start the application and exit with the code.
+	exitCode := run()
+	os.Exit(exitCode)
+}
+
+// run sets up signal handling for graceful shutdown, loads configuration, and
+// starts the continuous fuzzing cycles.
+func run() int {
 	// Initialize a structured logger that outputs logs in text format.
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
@@ -27,13 +35,14 @@ func main() {
 		var fe *flags.Error
 		if errors.As(err, &fe) && fe.Type == flags.ErrHelp {
 			// help requested
-			os.Exit(0)
+			return 0
 		}
 
 		// Print error if not due to help request.
 		logger.Error("Failed to load configuration", "error", err)
-		os.Exit(1)
+		return 1
 	}
+	defer utils.CleanupWorkspace(logger, cfg)
 
 	// Create a cancellable context to manage the application's lifecycle.
 	appCtx, cancelApp := context.WithCancel(context.Background())
@@ -50,7 +59,11 @@ func main() {
 	}()
 
 	// Start the continuous fuzzing cycles.
-	scheduler.RunFuzzingCycles(appCtx, logger, cfg)
+	if err := scheduler.RunFuzzingCycles(appCtx, logger, cfg); err != nil {
+		logger.Error("Failed to run fuzzing cycles", "error", err)
+		return 1
+	}
 
 	logger.Info("Program exited.")
+	return 0
 }

@@ -1,11 +1,14 @@
 # Variables
 APP_NAME := go-continuous-fuzz
-SRC := main.go
 DOCKER_APP_NAME := go-continuous-fuzz
 
 #? build: Build the project and create go-continuous-fuzz binary
 build:
-	@go build -o $(APP_NAME) $(SRC)
+	@go build -o $(APP_NAME)
+
+#? install: Install the binary as "go-continuous-fuzz" in Go bin directory
+install:
+	go install -v ./...
 
 #? run: Run the application with command-line flags set in $(ARGS) or config variables specified in configuration file.
 run: build

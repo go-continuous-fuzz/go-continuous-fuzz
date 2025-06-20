@@ -1,4 +1,4 @@
-package utils
+package main
 
 import (
 	"testing"
@@ -43,7 +43,7 @@ func TestSanitizeURL(t *testing.T) {
 	}
 }
 
-// TestCalculateFuzzSeconds verifies that CalculateFuzzSeconds correctly
+// TestCalculateFuzzSeconds verifies that calculateFuzzSeconds correctly
 // computes the per-target fuzz duration given a sync frequency, number of
 // parallel workers, and total number of fuzz targets.
 func TestCalculateFuzzSeconds(t *testing.T) {
@@ -59,7 +59,7 @@ func TestCalculateFuzzSeconds(t *testing.T) {
 	syncFrequency, err := time.ParseDuration("3h37m53s")
 	assert.NoError(t, err, "failed to parse syncFrequency")
 
-	actualDuration := CalculateFuzzSeconds(syncFrequency, totalWorkers,
+	actualDuration := calculateFuzzSeconds(syncFrequency, totalWorkers,
 		totalTargets)
 
 	assert.Equal(t, expectedDuration, actualDuration,

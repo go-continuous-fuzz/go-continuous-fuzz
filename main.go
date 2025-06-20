@@ -9,9 +9,6 @@ import (
 
 	"log/slog"
 
-	"github.com/go-continuous-fuzz/go-continuous-fuzz/config"
-	"github.com/go-continuous-fuzz/go-continuous-fuzz/scheduler"
-	"github.com/go-continuous-fuzz/go-continuous-fuzz/utils"
 	flags "github.com/jessevdk/go-flags"
 )
 
@@ -30,7 +27,7 @@ func run() int {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	// Load configuration settings from config file or command line flags.
-	cfg, err := config.LoadConfig()
+	cfg, err := loadConfig()
 	if err != nil {
 		var fe *flags.Error
 		if errors.As(err, &fe) && fe.Type == flags.ErrHelp {
@@ -42,7 +39,7 @@ func run() int {
 		logger.Error("Failed to load configuration", "error", err)
 		return 1
 	}
-	defer utils.CleanupWorkspace(logger, cfg)
+	defer cleanupWorkspace(logger, cfg)
 
 	// Create a cancellable context to manage the application's lifecycle.
 	appCtx, cancelApp := context.WithCancel(context.Background())
@@ -59,7 +56,7 @@ func run() int {
 	}()
 
 	// Start the continuous fuzzing cycles.
-	if err := scheduler.RunFuzzingCycles(appCtx, logger, cfg); err != nil {
+	if err := runFuzzingCycles(appCtx, logger, cfg); err != nil {
 		logger.Error("Failed to run fuzzing cycles", "error", err)
 		return 1
 	}

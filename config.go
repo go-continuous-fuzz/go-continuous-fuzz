@@ -1,4 +1,4 @@
-package config
+package main
 
 import (
 	"errors"
@@ -80,12 +80,12 @@ type Config struct {
 	Fuzz Fuzz `group:"Fuzz Options" namespace:"fuzz"`
 }
 
-// LoadConfig reads configuration values from
+// loadConfig reads configuration values from
 // (1) a default CONF file and
 // (2) any overriding command-line flags.
 // It performs validation on required fields and applies defaults where needed.
 // Returns a pointer to a Config struct or an error if validation fails.
-func LoadConfig() (*Config, error) {
+func loadConfig() (*Config, error) {
 	var cfg Config
 
 	// Determine the config file path

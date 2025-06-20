@@ -1,4 +1,4 @@
-package utils
+package main
 
 import (
 	"fmt"
@@ -7,20 +7,18 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/go-continuous-fuzz/go-continuous-fuzz/config"
 )
 
-// CleanupProject deletes the project directory to restart the fuzzing cycle.
-func CleanupProject(logger *slog.Logger, cfg *config.Config) {
+// cleanupProject deletes the project directory to restart the fuzzing cycle.
+func cleanupProject(logger *slog.Logger, cfg *Config) {
 	if err := os.RemoveAll(cfg.Project.SrcDir); err != nil {
 		logger.Error("project cleanup failed", "error", err)
 	}
 }
 
-// CleanupWorkspace deletes the temp directory to reset the workspace state.
+// cleanupWorkspace deletes the temp directory to reset the workspace state.
 // Any errors encountered during removal are logged, but do not stop execution.
-func CleanupWorkspace(logger *slog.Logger, cfg *config.Config) {
+func cleanupWorkspace(logger *slog.Logger, cfg *Config) {
 	// Since the config has the path to the project directory and we want to
 	// remove its temporary parent directory, we go up one level to its
 	// parent directory.
@@ -61,11 +59,11 @@ func SanitizeURL(rawURL string) string {
 	return parsed.String()
 }
 
-// CalculateFuzzSeconds returns the per-target fuzz duration such that all fuzz
+// calculateFuzzSeconds returns the per-target fuzz duration such that all fuzz
 // targets can be processed within the given syncFrequency. It calculates the
 // duration by dividing syncFrequency by the maximum number of tasks assigned to
 // any worker.
-func CalculateFuzzSeconds(syncFrequency time.Duration, numWorkers int,
+func calculateFuzzSeconds(syncFrequency time.Duration, numWorkers int,
 	totalTargets int) time.Duration {
 
 	tasksPerWorker := (totalTargets + numWorkers - 1) / numWorkers

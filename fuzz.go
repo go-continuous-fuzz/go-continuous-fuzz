@@ -1,4 +1,4 @@
-package fuzz
+package main
 
 import (
 	"bytes"
@@ -10,16 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/go-continuous-fuzz/go-continuous-fuzz/config"
-	"github.com/go-continuous-fuzz/go-continuous-fuzz/parser"
 )
 
-// ListFuzzTargets discovers and returns a list of fuzz targets for the given
+// listFuzzTargets discovers and returns a list of fuzz targets for the given
 // package. It uses "go test -list=^Fuzz" to list the functions and filters
 // those that start with "Fuzz".
-func ListFuzzTargets(ctx context.Context, logger *slog.Logger,
-	cfg *config.Config, pkg string) ([]string, error) {
+func listFuzzTargets(ctx context.Context, logger *slog.Logger, cfg *Config,
+	pkg string) ([]string, error) {
 
 	logger.Info("Discovering fuzz targets", "package", pkg)
 
@@ -68,11 +65,11 @@ func ListFuzzTargets(ctx context.Context, logger *slog.Logger,
 	return targets, nil
 }
 
-// ExecuteFuzzTarget runs the specified fuzz target for a package for a given
+// executeFuzzTarget runs the specified fuzz target for a package for a given
 // duration using the "go test" command. It sets up the necessary environment,
 // starts the command, streams its output, and logs any failures to a log file.
-func ExecuteFuzzTarget(ctx context.Context, logger *slog.Logger, pkg string,
-	target string, cfg *config.Config, fuzzTime time.Duration) error {
+func executeFuzzTarget(ctx context.Context, logger *slog.Logger, pkg string,
+	target string, cfg *Config, fuzzTime time.Duration) error {
 
 	logger.Info("Executing fuzz target", "package", pkg, "target", target,
 		"duration", fuzzTime)
@@ -95,7 +92,7 @@ func ExecuteFuzzTarget(ctx context.Context, logger *slog.Logger, pkg string,
 		"test",
 		fmt.Sprintf("-fuzz=^%s$", target),
 		fmt.Sprintf("-test.fuzzcachedir=%s", corpusPath),
-		fmt.Sprintf("-parallel=1"),
+		"-parallel=1",
 	}
 
 	// Initialize the 'go test' command with the specified arguments and
@@ -114,10 +111,10 @@ func ExecuteFuzzTarget(ctx context.Context, logger *slog.Logger, pkg string,
 	// Stream and process the standard output of 'go test' concurrently,
 	// which may include both stdout and stderr content.
 	go func() {
-		processor := parser.NewFuzzOutputProcessor(logger.
+		processor := NewFuzzOutputProcessor(logger.
 			With("target", target).With("package", pkg), cfg,
 			maybeFailingCorpusPath, target)
-		failingChan <- processor.ProcessFuzzStream(stdout)
+		failingChan <- processor.processFuzzStream(stdout)
 	}()
 
 	// Start the execution of the 'go test' command and wait for it to

@@ -1,4 +1,4 @@
-package scheduler
+package main
 
 import (
 	"context"
@@ -6,15 +6,11 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/go-continuous-fuzz/go-continuous-fuzz/config"
-	"github.com/go-continuous-fuzz/go-continuous-fuzz/fuzz"
-	"github.com/go-continuous-fuzz/go-continuous-fuzz/utils"
-	"github.com/go-continuous-fuzz/go-continuous-fuzz/worker"
 	"github.com/go-git/go-git/v5"
 	"golang.org/x/sync/errgroup"
 )
 
-// RunFuzzingCycles runs an infinite loop of fuzzing cycles. Each cycle consists
+// runFuzzingCycles runs an infinite loop of fuzzing cycles. Each cycle consists
 // of:
 //  1. Cloning the Git repository specified in cfg.Project.SrcRepo.
 //  2. Launching scheduler goroutines to execute all fuzz targets for a portion
@@ -23,17 +19,17 @@ import (
 //
 // The loop repeats until the parent context is canceled. Errors in cloning or
 // target discovery are returned immediately.
-func RunFuzzingCycles(ctx context.Context, logger *slog.Logger, cfg *config.
-	Config) error {
+func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
+	cfg *Config) error {
 
 	for {
 		// Cleanup the project directory (if any) created during
 		// previous runs.
-		utils.CleanupProject(logger, cfg)
+		cleanupProject(logger, cfg)
 
 		// 1. Clone the repository based on the provided configuration.
 		logger.Info("Cloning project repository", "url",
-			utils.SanitizeURL(cfg.Project.SrcRepo), "path",
+			SanitizeURL(cfg.Project.SrcRepo), "path",
 			cfg.Project.SrcDir)
 
 		_, err := git.PlainCloneContext(
@@ -110,16 +106,16 @@ func RunFuzzingCycles(ctx context.Context, logger *slog.Logger, cfg *config.
 //   - The cycle context (ctx) is canceled.
 //
 // Returns an error if any worker fails.
-func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *config.
-	Config, errChan chan error) {
+func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
+	errChan chan error) {
 
 	logger.Info("Starting fuzzing scheduler", "startTime", time.Now().
 		Format(time.RFC1123))
 
 	// Discover fuzz targets and build a task queue.
-	taskQueue := worker.NewTaskQueue()
+	taskQueue := NewTaskQueue()
 	for _, pkgPath := range cfg.Fuzz.PkgsPath {
-		targets, err := fuzz.ListFuzzTargets(ctx, logger, cfg, pkgPath)
+		targets, err := listFuzzTargets(ctx, logger, cfg, pkgPath)
 		if err != nil {
 			logger.Error("Failed to list fuzz targets", "package",
 				pkgPath)
@@ -128,7 +124,7 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *config.
 		}
 		// Enqueue all discovered fuzz targets.
 		for _, target := range targets {
-			taskQueue.Enqueue(worker.Task{
+			taskQueue.Enqueue(Task{
 				PackagePath: pkgPath,
 				Target:      target,
 			})
@@ -142,7 +138,7 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *config.
 	}
 
 	// Calculate the fuzzing time for each fuzz target.
-	perTargetTimeout := utils.CalculateFuzzSeconds(cfg.Fuzz.SyncFrequency,
+	perTargetTimeout := calculateFuzzSeconds(cfg.Fuzz.SyncFrequency,
 		cfg.Fuzz.NumWorkers, taskQueue.Length())
 
 	if perTargetTimeout == 0 {
@@ -158,7 +154,7 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *config.
 	g, workerCtx := errgroup.WithContext(ctx)
 	for workerID := 1; workerID <= cfg.Fuzz.NumWorkers; workerID++ {
 		g.Go(func() error {
-			return worker.RunWorker(workerID, workerCtx, taskQueue,
+			return runWorker(workerID, workerCtx, taskQueue,
 				perTargetTimeout, logger, cfg)
 		})
 	}

@@ -48,8 +48,6 @@ make build
 make run
 ```
 
-OR
-
 2. You can pass the configurations as command-line flags instead of specifying them in the config file.
    Run the following command to run the go-continuous-fuzz project:
 
@@ -73,4 +71,18 @@ make docker-run VOLUME_MOUNTS=<required>
 
 ```sh
 make test
+```
+
+## Additional Information
+
+You can install the compiled binary to your Go bin directory (`$GOBIN`, or `$HOME/go/bin` if `GOBIN` is not set) using the following command:
+
+```sh
+make install
+```
+
+After running this, you can use `go-continuous-fuzz` directly from your terminal:
+
+```sh
+go-continuous-fuzz --help
 ```

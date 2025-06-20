@@ -1,10 +1,9 @@
-package parser
+package main
 
 import (
 	"log/slog"
 	"testing"
 
-	"github.com/go-continuous-fuzz/go-continuous-fuzz/config"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -88,7 +87,7 @@ func TestReadInputData(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			processor := NewFuzzOutputProcessor(&slog.Logger{},
-				&config.Config{}, tt.corpusPath, "")
+				&Config{}, tt.corpusPath, "")
 
 			actualData := processor.readFailingInput(tt.fuzzTarget,
 				tt.testcaseID)

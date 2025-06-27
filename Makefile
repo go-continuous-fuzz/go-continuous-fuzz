@@ -32,7 +32,7 @@ test: unit-test e2e-test
 
 #? unit-test: Run unit tests with verbose output
 unit-test:
-	go test ./... -v
+	go test -v -race ./...
 
 #? e2e-test: Run e2e(integration) tests
 e2e-test:

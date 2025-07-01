@@ -1,11 +1,18 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/client"
 	"github.com/go-git/go-git/v5"
 	"golang.org/x/sync/errgroup"
 )
@@ -54,7 +61,7 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 
 		// Set up the grace period for all workers to finish their
 		// tasks.
-		gracePeriod := min(cfg.Fuzz.SyncFrequency/10, 1*time.Hour)
+		gracePeriod := min(cfg.Fuzz.SyncFrequency/5, 1*time.Hour)
 
 		// 3. Wait for either:
 		//    A) All workers finish early
@@ -150,21 +157,118 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
 	logger.Info("Per-target fuzz timeout calculated", "duration",
 		perTargetTimeout)
 
-	// Make sure to cancel all workers if any single worker errors.
-	g, workerCtx := errgroup.WithContext(ctx)
-	for workerID := 1; workerID <= cfg.Fuzz.NumWorkers; workerID++ {
-		g.Go(func() error {
-			return runWorker(workerID, workerCtx, taskQueue,
-				perTargetTimeout, logger, cfg)
-		})
+	// Create a Docker client for running containers.
+	cli, err := client.NewClientWithOpts(client.FromEnv,
+		client.WithAPIVersionNegotiation())
+	if err != nil {
+		errChan <- fmt.Errorf("failed to start docker client: %w", err)
+		return
+	}
+	defer func() {
+		if err := cli.Close(); err != nil {
+			logger.Error("Failed to stop docker client", "error",
+				err)
+		}
+	}()
+
+	// Pull the Docker image specified by ContainerImage ("golang:1.23.9").
+	reader, err := cli.ImagePull(ctx, ContainerImage,
+		image.PullOptions{})
+	if err != nil {
+		errChan <- fmt.Errorf("failed to pull docker image: %w", err)
+		return
+	}
+	defer func() {
+		err := reader.Close()
+		if err != nil {
+			logger.Error("Failed to close image logs reader",
+				"error", err)
+		}
+	}()
+
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		line := scanner.Text()
+		logger.Info("Image Pull output", "message", line)
+	}
+	if err := scanner.Err(); err != nil {
+		errChan <- fmt.Errorf("error reading image-pull stream: %w",
+			err)
+		return
 	}
 
-	// Wait for all workers to finish or for the first error/cancellation.
-	if err := g.Wait(); err != nil {
+	// Make sure to cancel all workers if any single worker errors.
+	g, workerCtx := errgroup.WithContext(ctx)
+	wg := &WorkerGroup{
+		ctx:         workerCtx,
+		logger:      logger,
+		goGroup:     g,
+		cli:         cli,
+		cfg:         cfg,
+		taskQueue:   taskQueue,
+		taskTimeout: perTargetTimeout,
+	}
+
+	// Start and wait for all workers to finish or for the first
+	// error/cancellation.
+	if err := wg.WorkersStartAndWait(cfg.Fuzz.NumWorkers); err != nil {
 		errChan <- fmt.Errorf("fuzzing process failed: %w", err)
 		return
 	}
 
 	logger.Info("All fuzz targets processed successfully in this cycle")
 	errChan <- nil
+}
+
+// listFuzzTargets discovers and returns a list of fuzz targets for the given
+// package. It uses "go test -list=^Fuzz" to list the functions and filters
+// those that start with "Fuzz".
+func listFuzzTargets(ctx context.Context, logger *slog.Logger, cfg *Config,
+	pkg string) ([]string, error) {
+
+	logger.Info("Discovering fuzz targets", "package", pkg)
+
+	// Construct the absolute path to the package directory within the
+	// temporary project directory.
+	pkgPath := filepath.Join(cfg.Project.SrcDir, pkg)
+
+	// Prepare the command to list all test functions matching the pattern
+	// "^Fuzz". This leverages go's testing tool to identify fuzz targets.
+	cmd := exec.CommandContext(ctx, "go", "test", "-list=^Fuzz", ".")
+
+	// Set the working directory to the package path.
+	cmd.Dir = pkgPath
+
+	// Initialize buffers to capture standard output and standard error from
+	// the command execution.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	// Execute the command and check for errors, when the context wasn't
+	// canceled.
+	if err := cmd.Run(); err != nil && ctx.Err() == nil {
+		return nil, fmt.Errorf("go test failed for %q: %w (output: %q)",
+			pkg, err, strings.TrimSpace(stderr.String()))
+	}
+
+	// targets holds the names of discovered fuzz targets.
+	var targets []string
+
+	// Process each line of the command's output.
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		cleanLine := strings.TrimSpace(line)
+		if strings.HasPrefix(cleanLine, "Fuzz") {
+			// If the line represents a fuzz target, add it to the
+			// list.
+			targets = append(targets, cleanLine)
+		}
+	}
+
+	// If no fuzz targets are found, log a warning to inform the user.
+	if len(targets) == 0 {
+		logger.Warn("No valid fuzz targets found", "package", pkg)
+	}
+
+	return targets, nil
 }

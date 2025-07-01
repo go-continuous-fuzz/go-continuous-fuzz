@@ -7,7 +7,7 @@ set -eux
 # Temporary Variables
 readonly PROJECT_SRC_PATH="https://github.com/go-continuous-fuzz/go-fuzzing-example.git"
 readonly SYNC_FREQUENCY="3m"
-readonly MAKE_TIMEOUT="5m"
+readonly MAKE_TIMEOUT="4m"
 
 # Use test workspace directory
 readonly TEST_WORKDIR=$(mktemp -dt "test-go-continuous-fuzz-XXXXXX")
@@ -23,14 +23,20 @@ ARGS="\
 --fuzz.results-path=${FUZZ_RESULTS_PATH} \
 --fuzz.num-workers=3 \
 --fuzz.pkgs-path=parser \
---fuzz.pkgs-path=stringutils"
+--fuzz.pkgs-path=stringutils \
+--fuzz.pkgs-path=tree"
 
-# Fuzz target definitions (package:function)
-readonly FUZZ_TARGETS=(
-  "parser:FuzzParseComplex"
+# Non-crashing fuzz target definitions (package:function)
+readonly NON_CRASHING_FUZZ_TARGETS=(
   "parser:FuzzEvalExpr"
-  "stringutils:FuzzUnSafeReverseString"
   "stringutils:FuzzReverseString"
+)
+
+# Crashing fuzz target definitions (function)
+readonly CRASHING_FUZZ_TARGETS=(
+  "FuzzParseComplex"
+  "FuzzUnSafeReverseString"
+  "FuzzBuildTree"
 )
 
 # Ensure that resources are cleaned up when the script exits
@@ -104,7 +110,7 @@ declare -A final_coverage_metrics
 
 # Capture initial corpus state
 echo "Recording initial corpus state..."
-for target in "${FUZZ_TARGETS[@]}"; do
+for target in "${NON_CRASHING_FUZZ_TARGETS[@]}"; do
   IFS=':' read -r pkg func <<<"${target}"
   echo "  - ${pkg}/${func}"
   initial_input_counts["${target}"]=$(count_corpus_inputs "${pkg}" "${func}")
@@ -131,8 +137,11 @@ fi
 # List of required patterns to check in the log
 readonly REQUIRED_PATTERNS=(
   'All workers completed early; cleaning up cycle' # due to grace period
-  'Fuzzing completed successfully'
-  'gathering baseline coverage'
+  'msg="Fuzzing in Docker completed successfully" package=stringutils target=FuzzUnSafeReverseString'
+  'msg="Fuzzing in Docker completed successfully" package=stringutils target=FuzzReverseString'
+  'msg="Fuzzing in Docker completed successfully" package=parser target=FuzzParseComplex'
+  'msg="Fuzzing in Docker completed successfully" package=parser target=FuzzEvalExpr'
+  'msg="Fuzzing in Docker completed successfully" package=tree target=FuzzBuildTree'
   'Shutdown initiated during fuzzing cycle; performing final cleanup.'
   'msg="Worker starting fuzz target" workerID=1'
   'msg="Worker starting fuzz target" workerID=2'
@@ -167,7 +176,7 @@ done
 
 # Capture final corpus state
 echo "Recording final corpus state..."
-for target in "${FUZZ_TARGETS[@]}"; do
+for target in "${NON_CRASHING_FUZZ_TARGETS[@]}"; do
   IFS=':' read -r pkg func <<<"${target}"
   echo "  - ${pkg}/${func}"
   final_input_counts["${target}"]=$(count_corpus_inputs "${pkg}" "${func}")
@@ -176,7 +185,7 @@ done
 
 # Validate corpus growth
 echo "Validating corpus growth..."
-for target in "${FUZZ_TARGETS[@]}"; do
+for target in "${NON_CRASHING_FUZZ_TARGETS[@]}"; do
   initial_count=${initial_input_counts["${target}"]}
   final_count=${final_input_counts["${target}"]}
 
@@ -188,7 +197,7 @@ done
 
 # Validate coverage metrics
 echo "Validating coverage metrics..."
-for target in "${FUZZ_TARGETS[@]}"; do
+for target in "${NON_CRASHING_FUZZ_TARGETS[@]}"; do
   initial_cov=${initial_coverage_metrics["${target}"]}
   final_cov=${final_coverage_metrics["${target}"]}
 
@@ -200,12 +209,15 @@ done
 
 # Verify crash reports
 echo "Checking crash reports..."
-required_crashes=(
-  "${FUZZ_RESULTS_PATH}/FuzzParseComplex_failure.log"
-  "${FUZZ_RESULTS_PATH}/FuzzUnSafeReverseString_failure.log"
-)
+# Ensure only the expected number of files exist in FUZZ_RESULTS_PATH (3 crash logs + 1 make_run.log)
+num_crash_files=$(ls "${FUZZ_RESULTS_PATH}" | wc -l)
+if [[ "${num_crash_files}" -ne 4 ]]; then
+  echo "❌ ERROR: Unexpected number of files in ${FUZZ_RESULTS_PATH} (found: ${num_crash_files}, expected: 4)"
+  exit 1
+fi
 
-for crash_file in "${required_crashes[@]}"; do
+for target in "${CRASHING_FUZZ_TARGETS[@]}"; do
+  crash_file=""${FUZZ_RESULTS_PATH}/${target}_failure.log""
   if [[ ! -f "${crash_file}" ]]; then
     echo "❌ ERROR: Missing crash report: ${crash_file}"
     exit 1

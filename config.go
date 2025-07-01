@@ -22,6 +22,23 @@ const (
 	// ConfigFilename is the filename for the go-continuous-fuzz
 	// configuration file.
 	ConfigFilename = "go-continuous-fuzz.conf"
+
+	// ContainerImage specifies the Docker image to use for running the
+	// container.
+	ContainerImage = "golang:1.23.9"
+
+	// ContainerProjectPath specifies the root directory for the project
+	// inside the container.
+	ContainerProjectPath = "/go-continuous-fuzz-project"
+
+	// ContainerCorpusPath specifies the directory inside the container used
+	// for the fuzz corpus.
+	ContainerCorpusPath = "/go-continuous-fuzz-corpus"
+
+	// ContainerGracePeriod specifies the grace period to account for
+	// container startup overhead and ensures that all targets have
+	// sufficient time to complete.
+	ContainerGracePeriod = 20 * time.Second
 )
 
 var (

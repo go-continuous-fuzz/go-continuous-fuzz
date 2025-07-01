@@ -149,10 +149,6 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 		return err
 	}
 
-	// Define the path where failing corpus inputs might be saved by the
-	// fuzzing process.
-	maybeFailingCorpusPath := filepath.Join(hostPkgPath, "testdata", "fuzz")
-
 	// Path to the package directory inside the container.
 	containerPkgPath := filepath.Join(ContainerProjectPath, pkg)
 
@@ -171,63 +167,49 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 	defer cancel()
 
 	c := &Container{
-		ctx:             fuzzCtx,
-		logger:          wg.logger,
-		cli:             wg.cli,
-		workDir:         containerPkgPath,
-		hostProjectPath: wg.cfg.Project.SrcDir,
-		hostCorpusPath:  hostCorpusPath,
-		cmd:             goTestCmd,
+		ctx:            fuzzCtx,
+		logger:         wg.logger,
+		cli:            wg.cli,
+		cfg:            wg.cfg,
+		workDir:        containerPkgPath,
+		hostCorpusPath: hostCorpusPath,
+		cmd:            goTestCmd,
 	}
 
 	// Start the fuzzing container.
-	containerID, logsReader, err := c.Start()
-
-	// If we have the container ID, it is possible that an error was
-	// returned but the container is still running. In that case, defer
-	// stopping the container so that it can be automatically removed.
-	if containerID != "" {
-		defer c.Stop(containerID)
-	}
-
+	containerID, err := c.Start()
 	if err != nil {
 		if fuzzCtx.Err() != nil {
 			return nil
 		}
 		return fmt.Errorf("error while starting container: %w", err)
 	}
+	defer c.Stop(containerID)
 
-	defer func() {
-		err := logsReader.Close()
+	// Channels to receive either a fuzz failure or a container error.
+	failingChan := make(chan bool, 1)
+	errorChan := make(chan error, 1)
+
+	// Begin processing logs and wait for completion/failure signal in a
+	// goroutine.
+	go c.WaitAndGetLogs(containerID, pkg, target, failingChan, errorChan)
+
+	select {
+	case <-fuzzCtx.Done():
+		// Context timeout or cancellation occurred.
+
+	case err := <-errorChan:
 		if err != nil {
-			wg.logger.Error("Failed to close logs reader", "error",
-				err)
+			// Container exited with an error (non-fuzz crash).
+			return fmt.Errorf("fuzz execution failed: %w", err)
 		}
-	}()
 
-	// Process the standard output, which may include both stdout and stderr
-	// content.
-	processor := NewFuzzOutputProcessor(wg.logger.With("target", target).
-		With("package", pkg), wg.cfg, maybeFailingCorpusPath, target)
-	isFailing := processor.processFuzzStream(logsReader)
-
-	// Wait for the the command to finish execution.
-	//
-	// Proceed to return an error only if the fuzz target did not fail
-	// (i.e., no failure was detected during fuzzing), and the command
-	// execution resulted in an error, and the error is not due to a
-	// cancellation of the context.
-	err = c.Wait(containerID)
-	if err != nil && fuzzCtx.Err() == nil && !isFailing {
-		return fmt.Errorf("fuzz execution failed: %w", err)
-	}
-
-	// If the fuzz target fails, 'go test' saves the failing input in the
-	// package's testdata/fuzz/<FuzzTestName> directory. To prevent these
-	// saved inputs from causing subsequent test runs to fail (especially
-	// when running other fuzz targets), we remove the testdata directory to
-	// clean up the failing inputs.
-	if isFailing {
+	case <-failingChan:
+		// If the fuzz target fails, 'go test' saves the failing input
+		// in the package's testdata/fuzz/<FuzzTestName> directory. To
+		// prevent these saved inputs from causing subsequent test runs
+		// to fail (especially when running other fuzz targets), we
+		// remove the testdata directory to clean up the failing inputs.
 		failingInputPath := filepath.Join(hostPkgPath, "testdata",
 			"fuzz", target)
 		if err := os.RemoveAll(failingInputPath); err != nil {

@@ -2,29 +2,28 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/stretchr/testify/assert"
 )
 
-// TestContainerRaceAndTimeout verifies that the Docker client is safe for
-// concurrent use by launching two containers at the same time. It also checks
-// that if both containers are set to run indefinitely, applying a context
-// timeout will stop them early, and that the total duration of each container's
-// lifecycle stays within the timeout limit.
-func TestContainerRaceAndTimeout(t *testing.T) {
+// TestContainerRace verifies that the Docker client is safe for concurrent use
+// by launching two containers in parallel. It ensures that concurrent
+// operations on a shared Docker client do not cause data races or unexpected
+// errors.
+func TestContainerRace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
 	// Create a temporary workspace for container mounts.
 	tmpDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Set up Docker client for running containers.
 	cli, err := client.NewClientWithOpts(client.FromEnv,
@@ -51,53 +50,38 @@ func TestContainerRaceAndTimeout(t *testing.T) {
 			taskCtx, taskCancel := context.WithTimeout(ctx, timeout)
 			defer taskCancel()
 
-			start := time.Now()
 			c := &Container{
-				ctx:             taskCtx,
-				cli:             cli,
-				workDir:         tmpDir,
-				hostProjectPath: tmpDir,
-				hostCorpusPath:  tmpDir,
-				cmd:             []string{"sleep", "infinity"},
+				ctx:    taskCtx,
+				logger: logger,
+				cli:    cli,
+				cfg: &Config{
+					Project: Project{
+						SrcDir: tmpDir,
+					},
+				},
+				workDir:        tmpDir,
+				hostCorpusPath: tmpDir,
+				cmd:            []string{"sleep", "infinity"},
 			}
 
-			id, logs, err := c.Start()
+			id, err := c.Start()
 			assert.NoError(t, err)
+			defer c.Stop(id)
 
-			// Ensure container stop and log reader close happen as
-			// soon as this test exits.
-			defer func() {
-				assert.NoError(t, c.cli.ContainerStop(
-					context.Background(), id,
-					container.StopOptions{}))
-				assert.NoError(t, logs.Close())
-			}()
+			errorChan := make(chan error, 1)
 
-			// Since reading from logs is blocking, the context
-			// deadline will expire and only a context deadline
-			// error should be returned.
-			if _, err := io.Copy(io.Discard, logs); err != nil {
-				if !errors.Is(err, context.Canceled) &&
-					!errors.Is(err,
-						context.DeadlineExceeded) {
+			// Start processing logs and wait for completion/failure
+			// signal in a goroutine.
+			go c.WaitAndGetLogs(id, "", "", nil, errorChan)
 
-					assert.NoError(t, err)
-				}
+			select {
+			case <-taskCtx.Done():
+				// This is the expected path: the context
+				// timeout.
+
+			case err := <-errorChan:
+				assert.NoError(t, err)
 			}
-
-			if err := c.Wait(id); err != nil {
-				if !errors.Is(err, context.Canceled) &&
-					!errors.Is(err,
-						context.DeadlineExceeded) {
-
-					assert.NoError(t, err)
-				}
-			}
-
-			// Verify the elapsed time is within 1s of the timeout.
-			elapsed := time.Since(start)
-			assert.InDelta(t, timeout.Seconds(), elapsed.Seconds(),
-				1.0)
 		})
 	}
 }

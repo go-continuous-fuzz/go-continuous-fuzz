@@ -32,13 +32,6 @@ readonly NON_CRASHING_FUZZ_TARGETS=(
   "stringutils:FuzzReverseString"
 )
 
-# Crashing fuzz target definitions (function)
-readonly CRASHING_FUZZ_TARGETS=(
-  "FuzzParseComplex"
-  "FuzzUnSafeReverseString"
-  "FuzzBuildTree"
-)
-
 # Ensure that resources are cleaned up when the script exits
 trap 'echo "Cleaning up resources..."; rm -rf "${TEST_WORKDIR}"' EXIT
 
@@ -147,6 +140,9 @@ readonly REQUIRED_PATTERNS=(
   'msg="Worker starting fuzz target" workerID=2'
   'msg="Worker starting fuzz target" workerID=3'
   'msg="Per-target fuzz timeout calculated" duration=1m30s'
+  'msg="Known crash detected. Please fix the failing testcase." target=FuzzParseComplex package=parser log_file=parser_FuzzParseComplex_fa6d8d93d0524e35_failure.log'
+  'msg="Known crash detected. Please fix the failing testcase." target=FuzzUnSafeReverseString package=stringutils log_file=stringutils_FuzzUnSafeReverseString_cfec419a119b189c_failure.log'
+  'msg="Known crash detected. Please fix the failing testcase." target=FuzzBuildTree package=tree log_file=tree_FuzzBuildTree_e3b0c44298fc1c14_failure.log'
 )
 
 # Verify that worker logs contain expected entries
@@ -216,8 +212,13 @@ if [[ "${num_crash_files}" -ne 4 ]]; then
   exit 1
 fi
 
-for target in "${CRASHING_FUZZ_TARGETS[@]}"; do
-  crash_file=""${FUZZ_RESULTS_PATH}/${target}_failure.log""
+required_crashes=(
+  "$FUZZ_RESULTS_PATH/parser_FuzzParseComplex_fa6d8d93d0524e35_failure.log"
+  "$FUZZ_RESULTS_PATH/stringutils_FuzzUnSafeReverseString_cfec419a119b189c_failure.log"
+  "$FUZZ_RESULTS_PATH/tree_FuzzBuildTree_e3b0c44298fc1c14_failure.log"
+)
+
+for crash_file in "${required_crashes[@]}"; do
   if [[ ! -f "${crash_file}" ]]; then
     echo "❌ ERROR: Missing crash report: ${crash_file}"
     exit 1

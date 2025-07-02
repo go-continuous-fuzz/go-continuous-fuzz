@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -69,4 +71,28 @@ func calculateFuzzSeconds(syncFrequency time.Duration, numWorkers int,
 	tasksPerWorker := (totalTargets + numWorkers - 1) / numWorkers
 	perTargetSeconds := int(syncFrequency.Seconds()) / tasksPerWorker
 	return time.Duration(perTargetSeconds) * time.Second
+}
+
+// ComputeSHA256Short computes a SHA-256 hash of the error data(*.go:<line>),
+// then returns the first 16 characters of the hash.
+func ComputeSHA256Short(errorData string) string {
+	hash := sha256.Sum256([]byte(errorData))
+	return hex.EncodeToString(hash[:])[:16]
+}
+
+// FileExistsInDir checks whether a file with the specified name exists
+// directly within the given directory.
+func FileExistsInDir(dirPath, fileName string) (bool, error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return false, err
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() && entry.Name() == fileName {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

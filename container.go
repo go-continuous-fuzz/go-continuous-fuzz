@@ -115,7 +115,8 @@ func (c *Container) WaitAndGetLogs(ID, pkg, target string,
 	// Process the standard output, which may include both stdout and stderr
 	// content.
 	processor := NewFuzzOutputProcessor(c.logger.With("target", target).
-		With("package", pkg), c.cfg, maybeFailingCorpusPath, target)
+		With("package", pkg), c.cfg, maybeFailingCorpusPath, pkg,
+		target)
 	crashed := processor.processFuzzStream(logsReader)
 
 	// Fuzz target crashed: notify via failingChan.

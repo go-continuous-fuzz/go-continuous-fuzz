@@ -20,9 +20,11 @@ import (
 // runFuzzingCycles runs an infinite loop of fuzzing cycles. Each cycle consists
 // of:
 //  1. Cloning the Git repository specified in cfg.Project.SrcRepo.
-//  2. Launching scheduler goroutines to execute all fuzz targets for a portion
+//  2. Downloading corpus from S3 bucket specified in cfg.Project.S3BucketName.
+//  3. Launching scheduler goroutines to execute all fuzz targets for a portion
 //     of cfg.Fuzz.SyncFrequency.
-//  3. Cleaning up the workspace.
+//  4. Cleaning up the workspace.
+//  5. Uploading the updated corpus to the S3 bucket.
 //
 // The loop repeats until the parent context is canceled. Errors in cloning or
 // target discovery are returned immediately.
@@ -30,9 +32,9 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 	cfg *Config) error {
 
 	for {
-		// Cleanup the project directory (if any) created during
-		// previous runs.
-		cleanupProject(logger, cfg)
+		// Cleanup the project and corpus directory (if any) created
+		// during previous runs.
+		cleanupProjectAndCorpus(logger, cfg)
 
 		// 1. Clone the repository based on the provided configuration.
 		logger.Info("Cloning project repository", "url",
@@ -50,7 +52,21 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 			return err
 		}
 
-		// 2. Create a scheduler context for this fuzz iteration.
+		// 2. Download corpus from S3 bucket.
+		s3cs, err := NewS3CorpusStore(ctx, logger, cfg)
+		if err != nil {
+			logger.Error("Failed to create S3 client; aborting" +
+				"scheduler")
+			return err
+		}
+
+		if err := s3cs.downloadUnZipCorpus(); err != nil {
+			logger.Error("Failed to download and unzip corpus; " +
+				"aborting scheduler")
+			return err
+		}
+
+		// 3. Create a scheduler context for this fuzz iteration.
 		schedulerCtx, cancelCycle := context.WithCancel(ctx)
 
 		// Channel to report any error that occurs during the cycle.
@@ -63,7 +79,7 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 		// tasks.
 		gracePeriod := min(cfg.Fuzz.SyncFrequency/5, 1*time.Hour)
 
-		// 3. Wait for either:
+		// 4. Wait for either:
 		//    A) All workers finish early
 		//    B) SyncFrequency elapses
 		//    C) Parent context cancellation
@@ -102,6 +118,13 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 			}
 			logger.Info("All workers completed early; cleaning " +
 				"up cycle")
+		}
+
+		// 5. Only upload the updated corpus if the cycle succeeded.
+		if err := s3cs.zipUploadCorpus(); err != nil {
+			logger.Error("Failed to zip and upload corpus; " +
+				"aborting scheduler")
+			return err
 		}
 	}
 }

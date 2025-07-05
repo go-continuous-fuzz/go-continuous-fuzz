@@ -7,14 +7,21 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
-// cleanupProject deletes the project directory to restart the fuzzing cycle.
-func cleanupProject(logger *slog.Logger, cfg *Config) {
+// cleanupProjectAndCorpus deletes the project and corpus directory to restart
+// the fuzzing cycle.
+func cleanupProjectAndCorpus(logger *slog.Logger, cfg *Config) {
 	if err := os.RemoveAll(cfg.Project.SrcDir); err != nil {
 		logger.Error("project cleanup failed", "error", err)
+	}
+
+	if err := os.RemoveAll(cfg.Project.CorpusDir); err != nil {
+		logger.Error("corpus cleanup failed", "error", err)
 	}
 }
 
@@ -95,4 +102,20 @@ func FileExistsInDir(dirPath, fileName string) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// extractRepo extracts the repository name from a Git remote URL.
+func extractRepo(srcURL string) (string, error) {
+	u, err := url.Parse(srcURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid repository URL: %w", err)
+	}
+
+	repo := strings.TrimSuffix(path.Base(u.Path), ".git")
+	if repo == "" {
+		return "", fmt.Errorf("could not parse repository name from "+
+			"%q", srcURL)
+	}
+
+	return repo, nil
 }

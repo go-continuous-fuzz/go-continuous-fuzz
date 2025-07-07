@@ -7,6 +7,46 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestParseFileAndLine verifies that parseFileAndLine correctly extracts
+// the .go file and line where error occurs from various fuzzing log formats.
+func TestParseFileAndLine(t *testing.T) {
+	tests := []struct {
+		name                string
+		logLine             string
+		expectedFileAndLine string
+	}{
+		{
+			name: "non relevant log line",
+			logLine: "--- FAIL: FuzzParseComplex " +
+				"(0.00s)",
+			expectedFileAndLine: "",
+		},
+		{
+			name: "custom error output format",
+			logLine: "      stringutils_test.go:17: " +
+				"Reverse produced invalid UTF-8 string",
+			expectedFileAndLine: "stringutils_test.go:17",
+		},
+		{
+			name: "stack-trace line format",
+			logLine: "go@1.23/1.23.9/libexec/src/" +
+				"testing/fuzz.go:322 +0x49c",
+			expectedFileAndLine: "go@1.23/1.23.9/libexec/src/" +
+				"testing/fuzz.go:322",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actualFileAndLine := parseFileAndLine(tt.logLine)
+			assert.Equal(
+				t, tt.expectedFileAndLine, actualFileAndLine,
+				"extracted file and line did not match",
+			)
+		})
+	}
+}
+
 // TestParseFailureLine verifies that parseFailureLine correctly extracts
 // the fuzzing target name and data ID from various fuzzing log formats.
 func TestParseFailureLine(t *testing.T) {
@@ -87,7 +127,7 @@ func TestReadInputData(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			processor := NewFuzzOutputProcessor(&slog.Logger{},
-				&Config{}, tt.corpusPath, "")
+				&Config{}, tt.corpusPath, "", "")
 
 			actualData := processor.readFailingInput(tt.fuzzTarget,
 				tt.testcaseID)

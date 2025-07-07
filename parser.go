@@ -26,6 +26,19 @@ var (
 		`Failing input written to testdata/fuzz/` +
 			`(?P<target>[^/]+)/(?P<id>[0-9a-f]+)`,
 	)
+
+	// fuzzFileLineRegex matches a stack-trace line indicating a fuzzing
+	// error, capturing the .go file name and line number.
+	//
+	// It matches lines like:
+	//   "stringutils_test.go:17: Reverse produced invalid UTF-8 string"
+	//
+	// Captured groups:
+	//   - "file": the .go file name (e.g., "stringutils_test.go")
+	//   - "line": the line number (e.g., "17")
+	fuzzFileLineRegex = regexp.MustCompile(
+		`\s*(?P<file>.*\.go):(?P<line>[0-9]+)`,
+	)
 )
 
 // fuzzOutputProcessor handles parsing and logging of fuzzing output streams,
@@ -40,20 +53,24 @@ type fuzzOutputProcessor struct {
 	// Directory containing the fuzzing corpus.
 	corpusDir string
 
+	// Name of the package under test.
+	packageName string
+
 	// Name of the fuzz target under test.
 	targetName string
 }
 
 // NewFuzzOutputProcessor constructs a fuzzOutputProcessor for the given logger,
 // config, corpus directory, and fuzz target name.
-func NewFuzzOutputProcessor(logger *slog.Logger, cfg *Config,
-	corpusDir string, targetName string) *fuzzOutputProcessor {
+func NewFuzzOutputProcessor(logger *slog.Logger, cfg *Config, corpusDir, pkg,
+	targetName string) *fuzzOutputProcessor {
 
 	return &fuzzOutputProcessor{
-		logger:     logger,
-		cfg:        cfg,
-		corpusDir:  corpusDir,
-		targetName: targetName,
+		logger:      logger,
+		cfg:         cfg,
+		corpusDir:   corpusDir,
+		packageName: pkg,
+		targetName:  targetName,
 	}
 }
 
@@ -92,46 +109,27 @@ func (fp *fuzzOutputProcessor) scanUntilFailure(scanner *bufio.Scanner) bool {
 // processFailureLines processes lines after a failure is detected, writes them
 // to a log file, and attempts to extract and log the failing input data.
 func (fp *fuzzOutputProcessor) processFailureLines(scanner *bufio.Scanner) {
-	// Construct the log file path for storing failure details.
-	logFileName := fmt.Sprintf("%s_failure.log", fp.targetName)
-	logPath := filepath.Join(fp.cfg.Fuzz.ResultsPath, logFileName)
-
-	// Ensure the results directory exists.
-	if err := EnsureDirExists(fp.cfg.Fuzz.ResultsPath); err != nil {
-		fp.logger.Error("Failed to create fuzz results directory",
-			"error", err)
-		return
-	}
-
-	// Create the log file for writing.
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		fp.logger.Error("Failed to create log file", "error", err)
-		return
-	}
-
-	// Ensure the log file is closed at the end.
-	defer func() {
-		if err := logFile.Close(); err != nil {
-			fp.logger.Error("Failed to close log file", "error",
-				err)
-		}
-	}()
-
-	fp.logger.Info("Opened failure log for writing", "path", logPath)
-
+	var failingLog string
 	var failingInputString string
+	var failingFileLine string
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		fp.logger.Info("Fuzzer output", "message", line)
 
-		// Write the current line to the failure log file.
-		_, err = logFile.WriteString(line + "\n")
-		if err != nil {
-			fp.logger.Error("Failed to write log line", "error",
-				err)
-			return
+		// Write the current line to the failure log.
+		failingLog += line + "\n"
+
+		// failingFileLine stores the .go file and line where the first
+		// error occurred, which is used for deduplication.
+		if failingFileLine == "" {
+			// Parse the current error line to extract the .go file
+			// and line, then assign it to failingFileLine.
+			errorFileAndLine := parseFileAndLine(line)
+
+			if errorFileAndLine != "" {
+				failingFileLine = errorFileAndLine
+			}
 		}
 
 		// If error data has already been captured, skip further
@@ -172,13 +170,124 @@ func (fp *fuzzOutputProcessor) processFailureLines(scanner *bufio.Scanner) {
 		)
 	}
 
+	// Ensure the results directory exists.
+	if err := EnsureDirExists(fp.cfg.Fuzz.ResultsPath); err != nil {
+		fp.logger.Error("Failed to create fuzz results directory",
+			"error", err)
+		return
+	}
+
+	// Check if the crash has already been recorded to avoid duplicate
+	// logging.
+	isKnown, logFileName, err := fp.isCrashDuplicate(failingFileLine)
+	if err != nil {
+		fp.logger.Error("Failed to perform crash deduplication",
+			"error", err)
+		return
+	}
+	if isKnown {
+		fp.logger.Info("Known crash detected. Please fix the failing "+
+			"testcase.", "log_file", logFileName)
+		return
+	}
+
+	// A new unique crash has been detected. Proceed to log the crash
+	// details.
+	if err := fp.writeCrashLog(logFileName, failingLog,
+		failingInputString); err != nil {
+		fp.logger.Error("Failed to write crash log", "error", err)
+		return
+	}
+}
+
+// isCrashDuplicate checks whether a crash with the same hash has already been
+// logged. Returns true if the crash is already known, false otherwise, along
+// with the generated log file name.
+func (fp *fuzzOutputProcessor) isCrashDuplicate(errorData string) (bool,
+	string, error) {
+
+	// Compute a short signature hash for the crash to help with
+	// deduplication.
+	crashHash := ComputeSHA256Short(errorData)
+
+	// Construct the log file name using the package, target name and crash
+	// hash.
+	logFileName := fmt.Sprintf("%s_%s_%s_failure.log", fp.packageName,
+		fp.targetName, crashHash)
+
+	// Check if a log file with the same signature already exists in the
+	// fuzz results directory.
+	isKnown, err := FileExistsInDir(fp.cfg.Fuzz.ResultsPath, logFileName)
+	if err != nil {
+		return false, "", fmt.Errorf("checking for existing crash "+
+			"log: %w", err)
+	}
+
+	return isKnown, logFileName, nil
+}
+
+// writeCrashLog writes crash logs into a file at the cfg.Fuzz.ResultsPath
+// location.
+func (fp *fuzzOutputProcessor) writeCrashLog(logFileName, failingLog,
+	failingInputString string) error {
+
+	// Construct the log file path for storing failure details.
+	logPath := filepath.Join(fp.cfg.Fuzz.ResultsPath, logFileName)
+
+	// Create the log file for writing.
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return fmt.Errorf("Failed to create log file: %w", err)
+	}
+
+	// Ensure the log file is closed at the end.
+	defer func() {
+		if err := logFile.Close(); err != nil {
+			fp.logger.Error("Failed to close log file", "error",
+				err)
+		}
+	}()
+
+	fp.logger.Info("Opened failure log for writing", "path", logPath)
+
+	// Write the error logs to the failure log file.
+	_, err = logFile.WriteString(failingLog)
+	if err != nil {
+		return fmt.Errorf("failed to write log line: %w", err)
+	}
+
 	// Write the error data to the log file.
 	_, err = logFile.WriteString(failingInputString + "\n")
 	if err != nil {
-		fp.logger.Error("Failed to write error data", "error",
-			err)
-		return
+		return fmt.Errorf("failed to write error data: %w", err)
 	}
+
+	return nil
+}
+
+// parseFileAndLine attempts to extract stack-trace line indicating a fuzzing
+// error, capturing the .go file name and line number.
+func parseFileAndLine(errorLine string) string {
+	// Apply the regular expression to the line to find matches
+	matches := fuzzFileLineRegex.FindStringSubmatch(errorLine)
+
+	// Return empty strings if no match is found
+	if matches == nil {
+		return ""
+	}
+
+	var file, line string
+	// Iterate over the named subexpressions to assign values of file and
+	// line.
+	for i, name := range fuzzFileLineRegex.SubexpNames() {
+		switch name {
+		case "file":
+			file = matches[i]
+		case "line":
+			line = matches[i]
+		}
+	}
+	return file + ":" + line
 }
 
 // parseFailureLine attempts to extract the fuzz target name and input ID

@@ -103,39 +103,37 @@ func TestReadInputData(t *testing.T) {
 		expectedData string
 	}{
 		{
-			name:       "missing input file returns error message",
-			fuzzTarget: "FuzzFoo",
-			testcaseID: "771e938e4458e888",
-			corpusPath: "testdata",
-			expectedData: "\n<< failed to read FuzzFoo/7" +
-				"71e938e4458e888: open testdata/FuzzFoo/" +
-				"771e938e4458e888: no such file or directory" +
-				" >>\n",
+			name:         "missing file returns error message",
+			fuzzTarget:   "FuzzFoo",
+			testcaseID:   "771e938e4458e888",
+			corpusPath:   "testdata",
+			expectedData: "",
 		},
 		{
 			name: "existing input file returns correct " +
 				"content",
-			fuzzTarget: "FuzzFoo",
-			testcaseID: "771e938e4458e983",
-			corpusPath: "testdata",
-			expectedData: "\n\n=== Failing testcase (FuzzFoo/" +
-				"771e938e4458e983) ===\ngo test fuzz v1\n" +
-				"string(\"0\")\n",
+			fuzzTarget:   "FuzzFoo",
+			testcaseID:   "771e938e4458e983",
+			corpusPath:   "testdata",
+			expectedData: "go test fuzz v1\nstring(\"0\")\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			processor := NewFuzzOutputProcessor(&slog.Logger{},
-				&Config{}, tt.corpusPath, "", "")
+				tt.corpusPath)
+			actualData, err := processor.readFailingInput(
+				tt.fuzzTarget, tt.testcaseID)
 
-			actualData := processor.readFailingInput(tt.fuzzTarget,
-				tt.testcaseID)
-			assert.Equal(
-				t, tt.expectedData, actualData,
-				"Mismatch between expected and actual input "+
-					"data",
-			)
+			if tt.expectedData != "" {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedData, actualData,
+					"Mismatch between expected and actual "+
+						"input data")
+			} else {
+				assert.Error(t, err)
+			}
 		})
 	}
 }

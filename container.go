@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -76,14 +77,14 @@ func (c *Container) Start() (string, error) {
 // and reports either a fuzz crash or the container's exit status.
 //
 // It reads logs until EOF or context cancellation, then:
-// 1. If a fuzz failure is detected, sends true on failingChan.
+// 1. If a fuzz failure is detected, crash data is sent on fuzzCrashChan.
 // 2. Otherwise, retrieves the container's exit error and sends it on errChan.
 //
 // No values are sent if the context is canceled or times out.
 //
 //	This MUST be run as a goroutine.
 func (c *Container) WaitAndGetLogs(ID, pkg, target string,
-	failingChan chan bool, errChan chan error) {
+	fuzzCrashChan chan fuzzCrash, errChan chan error) {
 
 	// Acquire the log stream (stdout + stderr) for the running container.
 	logsReader, err := c.cli.ContainerLogs(c.ctx, ID,
@@ -115,13 +116,17 @@ func (c *Container) WaitAndGetLogs(ID, pkg, target string,
 	// Process the standard output, which may include both stdout and stderr
 	// content.
 	processor := NewFuzzOutputProcessor(c.logger.With("target", target).
-		With("package", pkg), c.cfg, maybeFailingCorpusPath, pkg,
-		target)
-	crashed := processor.processFuzzStream(logsReader)
+		With("package", pkg), maybeFailingCorpusPath)
+	crashData, err := processor.processFuzzStream(logsReader)
+	if err != nil {
+		errChan <- fmt.Errorf("failed to process fuzz stream for "+
+			"container %s: %w", ID, err)
+		return
+	}
 
-	// Fuzz target crashed: notify via failingChan.
-	if crashed {
-		failingChan <- true
+	// Fuzz target crashed, so report and exit this goroutine.
+	if crashData != nil {
+		fuzzCrashChan <- *crashData
 		return
 	}
 
@@ -159,7 +164,9 @@ func (c *Container) Wait(ID string) error {
 func (c *Container) Stop(ID string) {
 	if err := c.cli.ContainerStop(context.Background(), ID,
 		container.StopOptions{}); err != nil {
-		c.logger.Error("Failed to stop container", "error", err,
-			"containerID", ID)
+		if !strings.Contains(err.Error(), "No such container") {
+			c.logger.Error("Failed to stop container", "error", err,
+				"containerID", ID)
+		}
 	}
 }

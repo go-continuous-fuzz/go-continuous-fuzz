@@ -41,54 +41,50 @@ var (
 	)
 )
 
+// fuzzCrash represents information about a crash encountered during fuzz
+// testing. It captures the error logs, the input that caused the failure, and
+// the location in the code where the first error occurred.
+type fuzzCrash struct {
+	errorLogs          string
+	failingInput       string
+	failureFileAndLine string
+}
+
 // fuzzOutputProcessor handles parsing and logging of fuzzing output streams,
 // detecting failures, and capturing/logging failing input data.
 type fuzzOutputProcessor struct {
 	// Logger for informational and error messages.
 	logger *slog.Logger
 
-	// Configuration settings provided by the user
-	cfg *Config
-
 	// Directory containing the fuzzing corpus.
 	corpusDir string
-
-	// Name of the package under test.
-	packageName string
-
-	// Name of the fuzz target under test.
-	targetName string
 }
 
-// NewFuzzOutputProcessor constructs a fuzzOutputProcessor for the given logger,
-// config, corpus directory, and fuzz target name.
-func NewFuzzOutputProcessor(logger *slog.Logger, cfg *Config, corpusDir, pkg,
-	targetName string) *fuzzOutputProcessor {
+// NewFuzzOutputProcessor constructs a fuzzOutputProcessor for the given logger
+// and corpus directory.
+func NewFuzzOutputProcessor(logger *slog.Logger,
+	corpusDir string) *fuzzOutputProcessor {
 
 	return &fuzzOutputProcessor{
-		logger:      logger,
-		cfg:         cfg,
-		corpusDir:   corpusDir,
-		packageName: pkg,
-		targetName:  targetName,
+		logger:    logger,
+		corpusDir: corpusDir,
 	}
 }
 
 // processFuzzStream reads each line from the fuzzing output stream, logs all
-// lines, and captures failure details if a failure is detected. Returns true if
-// a failure was found and processed, false otherwise.
-func (fp *fuzzOutputProcessor) processFuzzStream(stream io.Reader) bool {
+// lines, and captures failure details if a failure is detected.
+func (fp *fuzzOutputProcessor) processFuzzStream(stream io.Reader) (*fuzzCrash,
+	error) {
+
 	scanner := bufio.NewScanner(stream)
 
-	// Scan until a failure line is found; if not found, return false.
+	// Scan until a failure line is found; if not found, return nil.
 	if !fp.scanUntilFailure(scanner) {
-		return false
+		return nil, nil
 	}
 
 	// Process and log failure lines, capturing error data.
-	fp.processFailureLines(scanner)
-
-	return true
+	return fp.processFailureLines(scanner)
 }
 
 // scanUntilFailure scans the output until a failure indicator (--- FAIL:) is
@@ -106,9 +102,13 @@ func (fp *fuzzOutputProcessor) scanUntilFailure(scanner *bufio.Scanner) bool {
 	return false
 }
 
-// processFailureLines processes lines after a failure is detected, writes them
-// to a log file, and attempts to extract and log the failing input data.
-func (fp *fuzzOutputProcessor) processFailureLines(scanner *bufio.Scanner) {
+// processFailureLines scans the fuzzer output line by line after a failure is
+// detected. It collects relevant log lines, extracts the location of the first
+// error for deduplication, attempts to read the failing input data (if
+// available), and notify the caller about the crash.
+func (fp *fuzzOutputProcessor) processFailureLines(scanner *bufio.Scanner,
+) (*fuzzCrash, error) {
+
 	var failingLog string
 	var failingInputString string
 	var failingFileLine string
@@ -155,114 +155,20 @@ func (fp *fuzzOutputProcessor) processFailureLines(scanner *bufio.Scanner) {
 
 		// Read and store the input data associated with the failing
 		// target and ID.
-		failingInputString = fp.readFailingInput(target, id)
-	}
-
-	// If a crash occurs but we cannot obtain the failing input, it likely
-	// stems from a seed corpus entry added via f.Add. In that case, report
-	// that the failure happened while testing the seed corpus.
-	if failingInputString == "" {
-		failingInputString = fmt.Sprintf(
-			"\n\n=== Failing Testcase ===\n" +
-				"Failure occurred while testing the seed " +
-				"corpus; please check the entries added via " +
-				"f.Add.",
-		)
-	}
-
-	// Ensure the results directory exists.
-	if err := EnsureDirExists(fp.cfg.Fuzz.ResultsPath); err != nil {
-		fp.logger.Error("Failed to create fuzz results directory",
-			"error", err)
-		return
-	}
-
-	// Check if the crash has already been recorded to avoid duplicate
-	// logging.
-	isKnown, logFileName, err := fp.isCrashDuplicate(failingFileLine)
-	if err != nil {
-		fp.logger.Error("Failed to perform crash deduplication",
-			"error", err)
-		return
-	}
-	if isKnown {
-		fp.logger.Info("Known crash detected. Please fix the failing "+
-			"testcase.", "log_file", logFileName)
-		return
-	}
-
-	// A new unique crash has been detected. Proceed to log the crash
-	// details.
-	if err := fp.writeCrashLog(logFileName, failingLog,
-		failingInputString); err != nil {
-		fp.logger.Error("Failed to write crash log", "error", err)
-		return
-	}
-}
-
-// isCrashDuplicate checks whether a crash with the same hash has already been
-// logged. Returns true if the crash is already known, false otherwise, along
-// with the generated log file name.
-func (fp *fuzzOutputProcessor) isCrashDuplicate(errorData string) (bool,
-	string, error) {
-
-	// Compute a short signature hash for the crash to help with
-	// deduplication.
-	crashHash := ComputeSHA256Short(errorData)
-
-	// Construct the log file name using the package, target name and crash
-	// hash.
-	logFileName := fmt.Sprintf("%s_%s_%s_failure.log", fp.packageName,
-		fp.targetName, crashHash)
-
-	// Check if a log file with the same signature already exists in the
-	// fuzz results directory.
-	isKnown, err := FileExistsInDir(fp.cfg.Fuzz.ResultsPath, logFileName)
-	if err != nil {
-		return false, "", fmt.Errorf("checking for existing crash "+
-			"log: %w", err)
-	}
-
-	return isKnown, logFileName, nil
-}
-
-// writeCrashLog writes crash logs into a file at the cfg.Fuzz.ResultsPath
-// location.
-func (fp *fuzzOutputProcessor) writeCrashLog(logFileName, failingLog,
-	failingInputString string) error {
-
-	// Construct the log file path for storing failure details.
-	logPath := filepath.Join(fp.cfg.Fuzz.ResultsPath, logFileName)
-
-	// Create the log file for writing.
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		return fmt.Errorf("Failed to create log file: %w", err)
-	}
-
-	// Ensure the log file is closed at the end.
-	defer func() {
-		if err := logFile.Close(); err != nil {
-			fp.logger.Error("Failed to close log file", "error",
-				err)
+		var err error
+		failingInputString, err = fp.readFailingInput(target, id)
+		if err != nil {
+			return nil,
+				fmt.Errorf("processing fuzz stream: %w", err)
 		}
-	}()
-
-	fp.logger.Info("Opened failure log for writing", "path", logPath)
-
-	// Write the error logs to the failure log file.
-	_, err = logFile.WriteString(failingLog)
-	if err != nil {
-		return fmt.Errorf("failed to write log line: %w", err)
 	}
 
-	// Write the error data to the log file.
-	_, err = logFile.WriteString(failingInputString + "\n")
-	if err != nil {
-		return fmt.Errorf("failed to write error data: %w", err)
-	}
-
-	return nil
+	// Send all captured fuzz crash data to notify the caller.
+	return &fuzzCrash{
+		errorLogs:          failingLog,
+		failingInput:       failingInputString,
+		failureFileAndLine: failingFileLine,
+	}, nil
 }
 
 // parseFileAndLine attempts to extract stack-trace line indicating a fuzzing
@@ -318,8 +224,10 @@ func parseFailureLine(line string) (string, string) {
 }
 
 // readFailingInput attempts to read the failing input file from the corpus
-// directory.Returns the file contents or a placeholder string if reading fails.
-func (fp *fuzzOutputProcessor) readFailingInput(target, id string) string {
+// directory.Returns the file contents or error if reading fails.
+func (fp *fuzzOutputProcessor) readFailingInput(target, id string) (string,
+	error) {
+
 	// Construct the path to the failing input file.
 	failingInputPath := filepath.Join(target, id)
 	inputPath := filepath.Join(fp.corpusDir, failingInputPath)
@@ -327,14 +235,10 @@ func (fp *fuzzOutputProcessor) readFailingInput(target, id string) string {
 	// Attempt to read the file contents.
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
-		// If reading fails, return a placeholder string indicating the
-		// failure.
-		return fmt.Sprintf("\n<< failed to read %s: %v >>\n",
-			failingInputPath, err)
+		return "", fmt.Errorf("failed to read %s: %w", inputPath, err)
 	}
 
 	// If reading succeeds, format the content with a header indicating it's
 	// a failing test case.
-	return fmt.Sprintf("\n\n=== Failing testcase (%s) ===\n%s",
-		failingInputPath, data)
+	return string(data), nil
 }

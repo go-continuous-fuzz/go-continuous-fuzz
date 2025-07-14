@@ -78,23 +78,3 @@ jobs:
 
       - name: Run tests
         run: make unit-test
-
-  e2e-test:
-    name: Run E2E Tests
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Set up Go
-        id: setup
-        uses: actions/setup-go@v4
-        with:
-          go-version: "1.23.9"
-
-      - name: Install dependencies
-        run: go mod download
-
-      - name: Run E2E tests
-        run: make e2e-test

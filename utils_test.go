@@ -79,3 +79,49 @@ func TestComputeSHA256Short(t *testing.T) {
 	assert.Equal(t, expectedHash, actualHash, "Computed hash does not "+
 		"match the expected value")
 }
+
+// TestExtractRepo verifies that extractRepo correctly parse the repository
+// names from git URLs.
+func TestExtractRepo(t *testing.T) {
+	cases := []struct {
+		name             string
+		inputURL         string
+		expectedRepoName string
+		expectErrMsg     string
+	}{
+		{
+			name:             "valid git URL",
+			inputURL:         "https://github.com/owner/repo.git",
+			expectedRepoName: "repo",
+		},
+		{
+			name:             "valid git URL without .git suffix",
+			inputURL:         "https://github.com/owner/repo",
+			expectedRepoName: "repo",
+		},
+		{
+			name:         "invalid git URL",
+			inputURL:     "://not a url",
+			expectErrMsg: "invalid repository URL",
+		},
+		{
+			name:         "empty repository name in URL",
+			inputURL:     "https://github.com/owner/.git",
+			expectErrMsg: "could not parse repository name",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := extractRepo(tc.inputURL)
+			if tc.expectErrMsg != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectErrMsg)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expectedRepoName, got)
+		})
+	}
+}

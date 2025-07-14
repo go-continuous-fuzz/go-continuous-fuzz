@@ -140,7 +140,7 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 
 	// Define the path to store the corpus data generated during fuzzing on
 	// the host machine.
-	hostCorpusPath := filepath.Join(wg.cfg.Project.CorpusPath, pkg,
+	hostCorpusPath := filepath.Join(wg.cfg.Project.CorpusDir, pkg,
 		"testdata", "fuzz")
 
 	// Ensure that the corpus directory on the host machine exists to avoid

@@ -5,7 +5,7 @@ set -eux
 # ====== CONFIGURATION ======
 
 # Temporary Variables
-readonly PROJECT_SRC_PATH="https://github.com/go-continuous-fuzz/go-fuzzing-example.git"
+readonly PROJECT_SRC_PATH="https://oauth2:${GO_FUZZING_EXAMPLE_AUTH_TOKEN}@github.com/go-continuous-fuzz/go-fuzzing-example.git"
 readonly SYNC_FREQUENCY="3m"
 readonly MAKE_TIMEOUT="270s"
 
@@ -23,7 +23,7 @@ ARGS="\
 --project.src-repo=${PROJECT_SRC_PATH} \
 --project.s3-bucket-name=${BUCKET_NAME} \
 --fuzz.sync-frequency=${SYNC_FREQUENCY} \
---fuzz.results-path=${FUZZ_RESULTS_PATH} \
+--fuzz.crash-repo=${PROJECT_SRC_PATH} \
 --fuzz.num-workers=3 \
 --fuzz.pkgs-path=parser \
 --fuzz.pkgs-path=stringutils \
@@ -81,6 +81,41 @@ measure_fuzz_coverage() {
     grep "initial coverage bits:" | grep -oE "[0-9]+$")
 
   echo "${coverage_result}"
+}
+
+# Checks if any GitHub issue in a repository contains a given string.
+# Arguments:
+#   $1 - String to search for in issue bodies
+# Returns:
+#   Exits with 0 if a matching issue is found; otherwise exits with 1
+check_issue_contains_string() {
+  local search_string="$1"
+
+  # Extract owner, and repo from URL
+  local owner_repo owner repo
+  owner_repo=$(echo "${PROJECT_SRC_PATH}" | sed -n 's|.*github.com/\(.*\)\.git|\1|p')
+  owner=$(echo "${owner_repo}" | cut -d'/' -f1)
+  repo=$(echo "${owner_repo}" | cut -d'/' -f2)
+
+  if [[ -z "${owner}" || -z "${repo}" ]]; then
+    echo "❌ ERROR: Failed to parse owner/repo from URL."
+    return 1
+  fi
+
+  echo "Checking issues in ${owner}/${repo} for '${search_string}'..."
+
+  # Fetch issues from GitHub API
+  local issues
+  issues=$(curl -s \
+    "https://api.github.com/repos/${owner}/${repo}/issues")
+
+  # Check if any issue body contains the target string
+  if ! echo "${issues}" | grep -qF "${search_string}"; then
+    echo "❌ ERROR: No issue contains '${search_string}'"
+    return 1
+  fi
+
+  return 0
 }
 
 # Cleans up temporary workspace and S3 bucket
@@ -161,9 +196,6 @@ readonly REQUIRED_PATTERNS=(
   'msg="Worker starting fuzz target" workerID=2'
   'msg="Worker starting fuzz target" workerID=3'
   'msg="Per-target fuzz timeout calculated" duration=1m30s'
-  'msg="Known crash detected. Please fix the failing testcase." target=FuzzParseComplex package=parser log_file=parser_FuzzParseComplex_11e27f968d8a9807_failure.log'
-  'msg="Known crash detected. Please fix the failing testcase." target=FuzzUnSafeReverseString package=stringutils log_file=stringutils_FuzzUnSafeReverseString_42c3eb92e45ec7fd_failure.log'
-  'msg="Known crash detected. Please fix the failing testcase." target=FuzzBuildTree package=tree log_file=tree_FuzzBuildTree_e3b0c44298fc1c14_failure.log'
 )
 
 # Verify that worker logs contain expected entries
@@ -171,6 +203,25 @@ echo "Verifying worker log entries in ${MAKE_LOG}..."
 for pattern in "${REQUIRED_PATTERNS[@]}"; do
   if ! grep -q -- "${pattern}" "${MAKE_LOG}"; then
     echo "❌ ERROR: Missing expected log entry: ${pattern}"
+    exit 1
+  fi
+done
+
+# List of required log patterns where at least one in each group must be present
+# Format: pattern1 || pattern2
+readonly REQUIRED_PATTERN_GROUPS=(
+  'msg="Issue already exists" target=FuzzParseComplex package=parser||msg="Issue created successfully" target=FuzzParseComplex package=parser'
+  'msg="Issue already exists" target=FuzzUnSafeReverseString package=stringutils||msg="Issue created successfully" target=FuzzUnSafeReverseString package=stringutils'
+  'msg="Issue already exists" target=FuzzBuildTree package=tree||msg="Issue created successfully" target=FuzzBuildTree package=tree'
+)
+
+echo "Verifying required issue-related log entries in ${MAKE_LOG}..."
+for group in "${REQUIRED_PATTERN_GROUPS[@]}"; do
+  IFS='||' read -r pattern1 pattern2 <<<"$group"
+  if ! grep -q -- "${pattern1}" "${MAKE_LOG}" && ! grep -q -- "${pattern2}" "${MAKE_LOG}"; then
+    echo "❌ ERROR: Neither of the expected log entries found:"
+    echo "  -> ${pattern1}"
+    echo "  -> ${pattern2}"
     exit 1
   fi
 done
@@ -236,30 +287,32 @@ done
 
 # Verify crash reports
 echo "Checking crash reports..."
-# Ensure only the expected number of files exist in FUZZ_RESULTS_PATH (3 crash logs + 1 make_run.log)
+# Ensure only the expected number of files exist in FUZZ_RESULTS_PATH (1 make_run.log)
 num_crash_files=$(ls "${FUZZ_RESULTS_PATH}" | wc -l)
-if [[ "${num_crash_files}" -ne 4 ]]; then
-  echo "❌ ERROR: Unexpected number of files in ${FUZZ_RESULTS_PATH} (found: ${num_crash_files}, expected: 4)"
+if [[ "${num_crash_files}" -ne 1 ]]; then
+  echo "❌ ERROR: Unexpected number of files in ${FUZZ_RESULTS_PATH} (found: ${num_crash_files}, expected: 1)"
   exit 1
 fi
 
 required_crashes=(
-  "$FUZZ_RESULTS_PATH/parser_FuzzParseComplex_11e27f968d8a9807_failure.log"
-  "$FUZZ_RESULTS_PATH/stringutils_FuzzUnSafeReverseString_42c3eb92e45ec7fd_failure.log"
-  "$FUZZ_RESULTS_PATH/tree_FuzzBuildTree_e3b0c44298fc1c14_failure.log"
+  "testing.go:1591: panic: runtime error: index out of range [6] with length 6"
+  "stringutils_test.go:17: Reverse produced invalid UTF-8 string"
+  "fuzzing process hung or terminated unexpectedly: exit status 2"
 )
 
-for crash_file in "${required_crashes[@]}"; do
-  if [[ ! -f "${crash_file}" ]]; then
-    echo "❌ ERROR: Missing crash report: ${crash_file}"
-    exit 1
-  fi
-
-  if ! grep -q "go test fuzz v1" "${crash_file}"; then
-    echo "❌ ERROR: Invalid crash report format in ${crash_file}"
+for crash in "${required_crashes[@]}"; do
+  if ! check_issue_contains_string "${crash}"; then
+    echo "❌ Fuzzing exited with unexpected error (crash: ${crash})."
     exit 1
   fi
 done
+
+# Verify the expected number of open issues in the crash repo
+issue_count=$(curl -s "https://api.github.com/repos/go-continuous-fuzz/go-fuzzing-example/issues" | jq length)
+if [[ "${issue_count}" -ne 3 ]]; then
+  echo "❌ ERROR: Expected 3 open issues, but found ${issue_count}"
+  exit 1
+fi
 
 echo "✅ Fuzzing process completed successfully."
 exit 0

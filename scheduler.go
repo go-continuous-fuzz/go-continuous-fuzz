@@ -2,11 +2,9 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,11 +18,12 @@ import (
 // runFuzzingCycles runs an infinite loop of fuzzing cycles. Each cycle consists
 // of:
 //  1. Cloning the Git repository specified in cfg.Project.SrcRepo.
-//  2. Downloading corpus from S3 bucket specified in cfg.Project.S3BucketName.
+//  2. Downloading corpus and reports from S3 bucket specified in
+//     cfg.Project.S3BucketName.
 //  3. Launching scheduler goroutines to execute all fuzz targets for a portion
 //     of cfg.Fuzz.SyncFrequency.
 //  4. Cleaning up the workspace.
-//  5. Uploading the updated corpus to the S3 bucket.
+//  5. Uploading the updated corpus and reports to the S3 bucket.
 //
 // The loop repeats until the parent context is canceled. Errors in cloning or
 // target discovery are returned immediately.
@@ -32,9 +31,9 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 	cfg *Config) error {
 
 	for {
-		// Cleanup the project and corpus directory (if any) created
-		// during previous runs.
-		cleanupProjectAndCorpus(logger, cfg)
+		// Cleanup the project, corpus and reports directory (if any)
+		// created during previous runs.
+		cleanupProjectCorpusAndReport(logger, cfg)
 
 		// 1. Clone the repository based on the provided configuration.
 		logger.Info("Cloning project repository", "url",
@@ -52,16 +51,16 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 			return err
 		}
 
-		// 2. Download corpus from S3 bucket.
-		s3cs, err := NewS3CorpusStore(ctx, logger, cfg)
+		// 2. Download corpus and reports from S3 bucket.
+		s3s, err := NewS3Store(ctx, logger, cfg)
 		if err != nil {
 			logger.Error("Failed to create S3 client; aborting" +
 				"scheduler")
 			return err
 		}
 
-		if err := s3cs.downloadUnZipCorpus(); err != nil {
-			logger.Error("Failed to download and unzip corpus; " +
+		if err := s3s.downloadCorpusAndReports(); err != nil {
+			logger.Error("Failed to download corpus and reports; " +
 				"aborting scheduler")
 			return err
 		}
@@ -120,9 +119,10 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 				"up cycle")
 		}
 
-		// 5. Only upload the updated corpus if the cycle succeeded.
-		if err := s3cs.zipUploadCorpus(); err != nil {
-			logger.Error("Failed to zip and upload corpus; " +
+		// 5. Only upload the updated corpus and reports if the cycle
+		//    succeeded.
+		if err := s3s.uploadCorpusAndReports(); err != nil {
+			logger.Error("Failed to upload corpus and reports; " +
 				"aborting scheduler")
 			return err
 		}
@@ -142,7 +142,8 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
 	logger.Info("Starting fuzzing scheduler", "startTime", time.Now().
 		Format(time.RFC1123))
 
-	// Discover fuzz targets and build a task queue.
+	// Discover fuzz targets, and build the task queue and master state.
+	states := []TargetState{}
 	taskQueue := NewTaskQueue()
 	for _, pkgPath := range cfg.Fuzz.PkgsPath {
 		targets, err := listFuzzTargets(ctx, logger, cfg, pkgPath)
@@ -152,12 +153,16 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
 			errChan <- err
 			return
 		}
-		// Enqueue all discovered fuzz targets.
+
 		for _, target := range targets {
+			// Enqueue all discovered fuzz targets.
 			taskQueue.Enqueue(Task{
 				PackagePath: pkgPath,
 				Target:      target,
 			})
+
+			// Append all discovered fuzz targets in master state.
+			states = append(states, TargetState{pkgPath, target})
 		}
 	}
 
@@ -220,6 +225,22 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
 		return
 	}
 
+	// Extract the repository name from the source URL and use it to set the
+	// project name in the coverage reports.
+	repo, err := extractRepo(cfg.Project.SrcRepo)
+	if err != nil {
+		errChan <- fmt.Errorf("unable to extract repository name: %w",
+			err)
+		return
+	}
+
+	// Update the master index (index.html).
+	err = addToMaster(repo, cfg.Project.ReportDir, states, logger)
+	if err != nil {
+		errChan <- fmt.Errorf("master index update failed: %w", err)
+		return
+	}
+
 	// Make sure to cancel all workers if any single worker errors.
 	g, workerCtx := errgroup.WithContext(ctx)
 	wg := &WorkerGroup{
@@ -257,29 +278,20 @@ func listFuzzTargets(ctx context.Context, logger *slog.Logger, cfg *Config,
 
 	// Prepare the command to list all test functions matching the pattern
 	// "^Fuzz". This leverages go's testing tool to identify fuzz targets.
-	cmd := exec.CommandContext(ctx, "go", "test", "-list=^Fuzz", ".")
-
-	// Set the working directory to the package path.
-	cmd.Dir = pkgPath
-
-	// Initialize buffers to capture standard output and standard error from
-	// the command execution.
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
+	//
 	// Execute the command and check for errors, when the context wasn't
 	// canceled.
-	if err := cmd.Run(); err != nil && ctx.Err() == nil {
-		return nil, fmt.Errorf("go test failed for %q: %w (output: %q)",
-			pkg, err, strings.TrimSpace(stderr.String()))
+	cmd := []string{"test", "-list=^Fuzz", "."}
+	output, err := runGoCommand(ctx, pkgPath, cmd)
+	if err != nil && ctx.Err() == nil {
+		return nil, fmt.Errorf("go test failed for %q: %w ", pkg, err)
 	}
 
 	// targets holds the names of discovered fuzz targets.
 	var targets []string
 
 	// Process each line of the command's output.
-	for _, line := range strings.Split(stdout.String(), "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		cleanLine := strings.TrimSpace(line)
 		if strings.HasPrefix(cleanLine, "Fuzz") {
 			// If the line represents a fuzz target, add it to the

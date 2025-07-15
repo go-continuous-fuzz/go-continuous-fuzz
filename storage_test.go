@@ -28,8 +28,8 @@ func TestZipAndUnZipDir(t *testing.T) {
 		assert.NoError(t, os.WriteFile(path, data, 0o644))
 	}
 
-	// Initialize S3CorpusStore for zipping.
-	zipStore := &S3CorpusStore{
+	// Initialize S3Store for zipping.
+	zipStore := &S3Store{
 		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 		corpusDir: sourceDir,
 	}
@@ -52,8 +52,8 @@ func TestZipAndUnZipDir(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NoError(t, zipFile.Close())
 
-	// Initialize S3CorpusStore for unzipping.
-	unzipStore := &S3CorpusStore{
+	// Initialize S3Store for unzipping.
+	unzipStore := &S3Store{
 		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 		corpusDir: filepath.Join(archiveDir, "test_corpus"),
 		zipPath:   zipPath,

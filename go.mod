@@ -10,8 +10,10 @@ require (
 	github.com/btcsuite/btcd/btcutil v1.1.6
 	github.com/docker/docker v28.3.1+incompatible
 	github.com/go-git/go-git/v5 v5.16.2
+	github.com/google/go-github/v72 v72.0.0
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/stretchr/testify v1.10.0
+	golang.org/x/oauth2 v0.30.0
 	golang.org/x/sync v0.15.0
 )
 
@@ -55,6 +57,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect

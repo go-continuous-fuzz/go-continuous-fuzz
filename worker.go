@@ -129,7 +129,8 @@ func (wg *WorkerGroup) runWorker(workerID int) error {
 
 // executeFuzzTarget runs the specified fuzz target for a package for a given
 // duration using Docker. It sets up the necessary environment, starts the
-// container, streams its output, and logs any failures to a log file.
+// container, streams its output, and creates a GitHub issue reporting the crash
+// (if any).
 func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 	wg.logger.Info("Executing fuzz target in Docker", "package", pkg,
 		"target", target, "duration", wg.taskTimeout)
@@ -187,12 +188,12 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 	defer c.Stop(containerID)
 
 	// Channels to receive either a fuzz failure or a container error.
-	failingChan := make(chan bool, 1)
+	fuzzCrashChan := make(chan fuzzCrash, 1)
 	errorChan := make(chan error, 1)
 
 	// Begin processing logs and wait for completion/failure signal in a
 	// goroutine.
-	go c.WaitAndGetLogs(containerID, pkg, target, failingChan, errorChan)
+	go c.WaitAndGetLogs(containerID, pkg, target, fuzzCrashChan, errorChan)
 
 	select {
 	case <-fuzzCtx.Done():
@@ -204,7 +205,19 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 			return fmt.Errorf("fuzz execution failed: %w", err)
 		}
 
-	case <-failingChan:
+	case fuzzCrash := <-fuzzCrashChan:
+		// Create a GitHub client and report the fuzz crash.
+		gh, err := NewGitHubRepo(context.Background(), wg.logger.With(
+			"target", target).With("package", pkg),
+			wg.cfg.Fuzz.CrashRepo)
+		if err != nil {
+			return fmt.Errorf("initializing GitHub client: %w", err)
+		}
+
+		if err := gh.handleCrash(pkg, target, fuzzCrash); err != nil {
+			return fmt.Errorf("handling fuzz crash: %w", err)
+		}
+
 		// If the fuzz target fails, 'go test' saves the failing input
 		// in the package's testdata/fuzz/<FuzzTestName> directory. To
 		// prevent these saved inputs from causing subsequent test runs

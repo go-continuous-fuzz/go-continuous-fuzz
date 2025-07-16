@@ -125,3 +125,50 @@ func TestExtractRepo(t *testing.T) {
 		})
 	}
 }
+
+// TestFormatCrashReport verifies that the formatCrashReport function correctly
+// generates a markdown-formatted crash report.
+func TestFormatCrashReport(t *testing.T) {
+	tests := []struct {
+		name               string
+		failingLog         string
+		failingInputString string
+		expectedReport     string
+	}{
+		{
+			name:               "with failing input string",
+			failingLog:         "--- FAIL: FuzzParseComplex\n",
+			failingInputString: "go test fuzz v1\nstring(\"0\")\n",
+			expectedReport: "## Error logs\n" +
+				"~~~sh\n" +
+				"--- FAIL: FuzzParseComplex\n" +
+				"~~~\n" +
+				"## Failing testcase\n" +
+				"~~~sh\n" +
+				"go test fuzz v1\n" +
+				"string(\"0\")\n\n" +
+				"~~~\n" + waterMark + "\n",
+		},
+		{
+			name:       "empty failing input string",
+			failingLog: "--- FAIL: FuzzBuildTree\n",
+			expectedReport: "## Error logs\n" +
+				"~~~sh\n" +
+				"--- FAIL: FuzzBuildTree\n" +
+				"~~~\n" +
+				"## Failing testcase\n" +
+				"~~~sh\n" +
+				"Failure occurred while testing the seed " +
+				"corpus; please check the entries added via " +
+				"f.Add.\n" + "~~~\n" + waterMark + "\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			report := formatCrashReport(tt.failingLog,
+				tt.failingInputString)
+			assert.Equal(t, tt.expectedReport, report)
+		})
+	}
+}

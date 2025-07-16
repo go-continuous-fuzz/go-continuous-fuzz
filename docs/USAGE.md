@@ -4,19 +4,27 @@
 
 You can configure **go-continuous-fuzz** using either conifg file or command-line flags. All options are listed below:
 
-| Configuration Variable   | Description                                                | Required | Default |
-| ------------------------ | ---------------------------------------------------------- | -------- | ------- |
-| `project.src-repo`       | Git repo URL of the project to fuzz                        | Yes      | —       |
-| `project.s3-bucket-name` | Name of the S3 bucket where the seed corpus will be stored | Yes      | —       |
-| `fuzz.results-path`      | Path to store fuzzing results                              | Yes      | —       |
-| `fuzz.pkgs-path`         | List of package paths to fuzz                              | Yes      | —       |
-| `fuzz.sync-frequency`    | Duration between consecutive fuzzing cycles                | No       | 24h     |
-| `fuzz.num-workers`       | Number of concurrent fuzzing workers                       | No       | 1       |
+| Configuration Variable   | Description                                                  | Required | Default |
+| ------------------------ | ------------------------------------------------------------ | -------- | ------- |
+| `project.src-repo`       | Git repo URL of the project to fuzz                          | Yes      | —       |
+| `project.s3-bucket-name` | Name of the S3 bucket where the seed corpus will be stored   | Yes      | —       |
+| `fuzz.crash-repo`        | Git repository URL where issues are created for fuzz crashes | Yes      | —       |
+| `fuzz.pkgs-path`         | List of package paths to fuzz                                | Yes      | —       |
+| `fuzz.sync-frequency`    | Duration between consecutive fuzzing cycles                  | No       | 24h     |
+| `fuzz.num-workers`       | Number of concurrent fuzzing workers                         | No       | 1       |
 
 **Repository URL formats:**
+For `project.src-repo`:
 
 - Private: `https://oauth2:PAT@github.com/OWNER/REPO.git`
 - Public: `https://github.com/OWNER/REPO.git`
+
+For `fuzz.crash-repo`:
+
+- (Requires authentication): `https://oauth2:PAT@github.com/OWNER/REPO.git`
+
+Note: The authentication token is used to open issues on GitHub whenever a crash is detected.
+In short, issues will be created from the GitHub account associated with the provided authentication token.
 
 **AWS S3 Storage Guidelines**
 
@@ -70,6 +78,9 @@ Note: The updated corpus will be uploaded to the S3 bucket only if the fuzzing c
 4. **Corpus Persistence:**  
    For each fuzz target, the fuzzing engine generates an input corpus. Depending on the `project.s3-bucket-name` setting, this corpus is saved to the specified AWS S3 bucket, ensuring that the test inputs are preserved and can be reused in future runs.
 
+5. **Crash Reporting:**
+   Whenever a crash is detected, an issue will be opened in `fuzz.crash-repo` containing the error logs and the failing input data. This feature includes crash deduplication to avoid creating duplicate issues.
+
 ## Running go-continuous-fuzz
 
 1. **Clone the Repository**
@@ -80,7 +91,7 @@ Note: The updated corpus will be uploaded to the S3 bucket only if the fuzzing c
    ```
 
 2. **Set Configuration paramaters**  
-   You can set the configuration variables in the config file:
+    You can set the configuration variables in the config file:
    See: [sample-go-continuous-fuzz.conf](../sample-go-continuous-fuzz.conf)
 
    Or pass flags directly:
@@ -88,7 +99,7 @@ Note: The updated corpus will be uploaded to the S3 bucket only if the fuzzing c
    ```bash
      --project.src-repo=<project_repo_url>
      --project.s3-bucket-name=<bucket_name>
-     --fuzz.results-path=<path/to/file>
+     --fuzz.crash-repo=<repo_url>
      --fuzz.pkgs-path=<path/to/pkg>
      --fuzz.sync-frequency=<time>
      --fuzz.num-workers=<number_of_workers>

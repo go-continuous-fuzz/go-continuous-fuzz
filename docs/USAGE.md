@@ -64,6 +64,20 @@ In short, issues will be created from the GitHub account associated with the pro
 
 Note: The updated corpus will be uploaded to the S3 bucket only if the fuzzing cycle completes successfully without any errors or user interruptions.
 
+**Coverage Reports**
+
+Coverage reports are stored in the specified AWS S3 bucket. This bucket can be configured to serve as a static website for viewing the reports. The entry point for the reports is the `index.html` file. Users should ensure that the appropriate settings are enabled in the S3 bucket to allow static website hosting.
+
+The file structure of the coverage reports is as follows:
+
+- `index.html`: The master report page containing links to individual package/target reports.
+- `state.json`: A JSON file containing all previously registered package/target pairs.
+- `targets/`: A directory containing:
+
+  - A separate `.html` file for each package/target coverage report.
+  - A `.json` history file tracking daily coverage changes for each package/target.
+  - Subdirectories structured as `pkg/fuzzTarget/` containing daily HTML coverage reports (e.g., `2025-07-12.html`) generated via `go tool cover`.
+
 ## How It Works
 
 1. **Configuration:**  
@@ -80,6 +94,9 @@ Note: The updated corpus will be uploaded to the S3 bucket only if the fuzzing c
 
 5. **Crash Reporting:**
    Whenever a crash is detected, an issue will be opened in `fuzz.crash-repo` containing the error logs and the failing input data. This feature includes crash deduplication to avoid creating duplicate issues.
+
+6. **Coverage Reports:**
+   For each fuzz target, coverage reports are generated and uploaded to the configured AWS S3 bucket (`project.s3-bucket-name`). The bucket can be optionally configured for static website hosting to view reports via a browser.
 
 ## Running go-continuous-fuzz
 

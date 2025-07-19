@@ -1,0 +1,22 @@
+[
+  {
+    "PkgPath": "parser",
+    "Target": "FuzzEvalExpr"
+  },
+  {
+    "PkgPath": "parser",
+    "Target": "FuzzParseComplex"
+  },
+  {
+    "PkgPath": "stringutils",
+    "Target": "FuzzReverseString"
+  },
+  {
+    "PkgPath": "stringutils",
+    "Target": "FuzzUnSafeReverseString"
+  },
+  {
+    "PkgPath": "tree",
+    "Target": "FuzzBuildTree"
+  }
+]

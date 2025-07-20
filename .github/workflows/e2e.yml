@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  e2e-test:
-    name: Run E2E Tests
+  e2e-test-docker:
+    name: E2E Tests for Docker setup
     runs-on: ubuntu-latest
     env:
       GO_FUZZING_EXAMPLE_AUTH_TOKEN: ${{ secrets.GO_FUZZING_EXAMPLE_AUTH_TOKEN }}
@@ -41,5 +41,48 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
-      - name: Run E2E tests
-        run: make e2e-test
+      - name: Run E2E Tests for Docker setup
+        run: make e2e-test-docker
+
+  e2e-test-k8s:
+    name: E2E Tests for Kubernetes setup
+    runs-on: ubuntu-latest
+    needs: e2e-test-docker
+    env:
+      GO_FUZZING_EXAMPLE_AUTH_TOKEN: ${{ secrets.GO_FUZZING_EXAMPLE_AUTH_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.commit_sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::362112066003:role/s3_go-continuous-fuzz
+          aws-region: us-east-1
+
+      - name: Start minikube
+        id: minikube
+        uses: medyagh/setup-minikube@latest
+        with:
+          cpus: 4
+          memory: 8g
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Go
+        id: setup
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.23.9"
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run E2E Tests for Kubernetes setup
+        run: make e2e-test-k8s

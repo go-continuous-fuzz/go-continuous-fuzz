@@ -6,12 +6,22 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/docker/docker/client"
 	"golang.org/x/sync/errgroup"
+	"k8s.io/client-go/kubernetes"
 )
+
+// FuzzRunner abstracts Kubernetes or Docker fuzz execution
+type FuzzRunner interface {
+	Start() (string, error)
+	Stop(ID string)
+	WaitAndGetLogs(ID string, pkg string, target string,
+		fuzzCrashChan chan fuzzCrash, errChan chan error)
+}
 
 // Task represents a single fuzz target job, containing the package path and the
 // specific target name to execute.
@@ -64,15 +74,16 @@ func (q *TaskQueue) Dequeue() (Task, bool) {
 }
 
 // WorkerGroup manages a group of fuzzing workers, their context, logger, Docker
-// client, configuration, shared task queue, and per-task timeout.
+// or Kubernetes client, configuration, shared task queue, and per-task timeout.
 type WorkerGroup struct {
-	ctx         context.Context
-	logger      *slog.Logger
-	goGroup     *errgroup.Group
-	cli         *client.Client
-	cfg         *Config
-	taskQueue   *TaskQueue
-	taskTimeout time.Duration
+	ctx          context.Context
+	logger       *slog.Logger
+	goGroup      *errgroup.Group
+	dockerClient *client.Client
+	k8sClientSet *kubernetes.Clientset
+	cfg          *Config
+	taskQueue    *TaskQueue
+	taskTimeout  time.Duration
 }
 
 // WorkersStartAndWait starts the specified number of workers and waits for all
@@ -128,72 +139,57 @@ func (wg *WorkerGroup) runWorker(workerID int) error {
 }
 
 // executeFuzzTarget runs the specified fuzz target for a package for a given
-// duration using Docker. It sets up the necessary environment, starts the
-// container, streams its output, creates a GitHub issue reporting the crash
-// (if any), and updates the coverage report.
+// duration using either Kubernetes (in-cluster) or Docker. It handles
+// environment setup, execution, log streaming, creates a GitHub issue
+// reporting the crash (if any), and updates the coverage report.
 func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
-	wg.logger.Info("Executing fuzz target in Docker", "package", pkg,
+	// Determine execution environment
+	mode := "Docker"
+	if wg.cfg.Fuzz.InCluster {
+		mode = "Kubernetes"
+	}
+	wg.logger.Info("Executing fuzz target", "mode", mode, "package", pkg,
 		"target", target, "duration", wg.taskTimeout)
 
 	// Construct the absolute path to the package directory within the
-	// temporary project directory on the host machine.
-	hostPkgPath := filepath.Join(wg.cfg.Project.SrcDir, pkg)
+	// temporary project directory.
+	pkgPath := filepath.Join(wg.cfg.Project.SrcDir, pkg)
 
-	// Define the path to store the corpus data generated during fuzzing on
-	// the host machine.
-	hostCorpusPath := filepath.Join(wg.cfg.Project.CorpusDir, pkg,
-		"testdata", "fuzz")
+	// Define the path to store the corpus data generated during fuzzing.
+	corpusPath := filepath.Join(wg.cfg.Project.CorpusDir, pkg, "testdata",
+		"fuzz")
 
-	// Ensure that the corpus directory on the host machine exists to avoid
-	// permission errors when running the container as a non-root user.
-	if err := EnsureDirExists(hostCorpusPath); err != nil {
+	// Ensure that the corpus directory exists to avoid permission errors
+	// when running the container/pod as a non-root user.
+	if err := EnsureDirExists(corpusPath); err != nil {
 		return err
-	}
-
-	// Path to the package directory inside the container.
-	containerPkgPath := filepath.Join(ContainerProjectPath, pkg)
-
-	// Prepare the arguments for the 'go test' command to run the specific
-	// fuzz target in container.
-	goTestCmd := []string{
-		"go", "test",
-		fmt.Sprintf("-fuzz=^%s$", target),
-		fmt.Sprintf("-test.fuzzcachedir=%s", ContainerCorpusPath),
-		"-parallel=1",
 	}
 
 	// Create a subcontext with timeout for this individual fuzz target.
 	fuzzCtx, cancel := context.WithTimeout(wg.ctx, wg.taskTimeout+
-		ContainerGracePeriod)
+		FuzzGracePeriod)
 	defer cancel()
 
-	c := &Container{
-		ctx:            fuzzCtx,
-		logger:         wg.logger,
-		cli:            wg.cli,
-		cfg:            wg.cfg,
-		workDir:        containerPkgPath,
-		hostCorpusPath: hostCorpusPath,
-		cmd:            goTestCmd,
-	}
+	// Prepare runner configuration.
+	runner := wg.createFuzzRunner(fuzzCtx, pkg, target, pkgPath, corpusPath)
 
-	// Start the fuzzing container.
-	containerID, err := c.Start()
+	// Start the fuzzing runner.
+	fuzzID, err := runner.Start()
 	if err != nil {
 		if fuzzCtx.Err() != nil {
 			return nil
 		}
-		return fmt.Errorf("error while starting container: %w", err)
+		return fmt.Errorf("failed to start fuzz runner: %w", err)
 	}
-	defer c.Stop(containerID)
+	defer runner.Stop(fuzzID)
 
-	// Channels to receive either a fuzz failure or a container error.
+	// Channels to receive either a fuzz failure or a runner error.
 	fuzzCrashChan := make(chan fuzzCrash, 1)
 	errorChan := make(chan error, 1)
 
 	// Begin processing logs and wait for completion/failure signal in a
 	// goroutine.
-	go c.WaitAndGetLogs(containerID, pkg, target, fuzzCrashChan, errorChan)
+	go runner.WaitAndGetLogs(fuzzID, pkg, target, fuzzCrashChan, errorChan)
 
 	select {
 	case <-fuzzCtx.Done():
@@ -225,16 +221,16 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 		// prevent these saved inputs from causing subsequent test runs
 		// to fail (especially when running other fuzz targets), we
 		// remove the testdata directory to clean up the failing inputs.
-		failingInputPath := filepath.Join(hostPkgPath, "testdata",
-			"fuzz", target)
+		failingInputPath := filepath.Join(pkgPath, "testdata", "fuzz",
+			target)
 		if err := os.RemoveAll(failingInputPath); err != nil {
 			return fmt.Errorf("failing input cleanup failed: %w",
 				err)
 		}
 	}
 
-	wg.logger.Info("Fuzzing in Docker completed successfully", "package",
-		pkg, "target", target)
+	wg.logger.Info("Fuzzing completed successfully", "mode", mode,
+		"package", pkg, "target", target)
 
 	err = updateReport(wg.ctx, pkg, target, wg.cfg, wg.logger)
 	if err != nil {
@@ -249,4 +245,46 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 		pkg, "target", target)
 
 	return nil
+}
+
+// createFuzzRunner initializes the appropriate fuzzing runner (either
+// Kubernetes job or Docker container) based on the execution mode.
+func (wg *WorkerGroup) createFuzzRunner(ctx context.Context, pkg, target,
+	pkgPath, corpusPath string) FuzzRunner {
+
+	// Prepare the base arguments for the 'go test' command to run the
+	// specific fuzz target in container/pod.
+	cmd := []string{
+		"go", "test",
+		fmt.Sprintf("-fuzz=^%s$", target),
+		"-parallel=1",
+	}
+
+	// Append fuzz cache directory path depending on the mode
+	if wg.cfg.Fuzz.InCluster {
+		cmd = append(cmd, fmt.Sprintf("-test.fuzzcachedir=%s",
+			corpusPath))
+		return &K8sJob{
+			ctx:    ctx,
+			logger: wg.logger,
+			jobName: strings.ToLower(fmt.Sprintf("fuzz-job-%s-%s",
+				pkg, target)),
+			clientset: wg.k8sClientSet,
+			cfg:       wg.cfg,
+			workDir:   pkgPath,
+			cmd:       cmd,
+		}
+	}
+
+	cmd = append(cmd, fmt.Sprintf("-test.fuzzcachedir=%s",
+		ContainerCorpusPath))
+	return &Container{
+		ctx:            ctx,
+		logger:         wg.logger,
+		cli:            wg.dockerClient,
+		cfg:            wg.cfg,
+		workDir:        filepath.Join(ContainerProjectPath, pkg),
+		hostCorpusPath: corpusPath,
+		cmd:            cmd,
+	}
 }

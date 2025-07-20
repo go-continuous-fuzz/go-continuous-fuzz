@@ -4,6 +4,13 @@ set -eux
 
 # ====== CONFIGURATION ======
 
+readonly MODE="${1:-docker}" # default to 'docker' if not specified
+# Validate MODE
+if [[ "$MODE" != "docker" && "$MODE" != "k8s" ]]; then
+  echo "❌ Invalid mode: '$MODE'. Allowed values are 'docker' or 'k8s'."
+  exit 1
+fi
+
 # Temporary Variables
 readonly PROJECT_SRC_PATH="https://oauth2:${GO_FUZZING_EXAMPLE_AUTH_TOKEN}@github.com/go-continuous-fuzz/go-fuzzing-example.git"
 readonly SYNC_FREQUENCY="3m"
@@ -18,17 +25,6 @@ readonly CORPUS_ZIP_NAME="${CORPUS_DIR_NAME}.zip"
 readonly CORPUS_DIR_PATH="${TEST_WORKDIR}/${CORPUS_DIR_NAME}"
 readonly FUZZ_RESULTS_PATH="${TEST_WORKDIR}/fuzz_results"
 readonly BUCKET_NAME="test-go-continuous-fuzz-bucket"
-
-# Command-line flags for fuzzing process configuration
-ARGS="\
---project.src-repo=${PROJECT_SRC_PATH} \
---project.s3-bucket-name=${BUCKET_NAME} \
---fuzz.sync-frequency=${SYNC_FREQUENCY} \
---fuzz.crash-repo=${PROJECT_SRC_PATH} \
---fuzz.num-workers=3 \
---fuzz.pkgs-path=parser \
---fuzz.pkgs-path=stringutils \
---fuzz.pkgs-path=tree"
 
 # Non-crashing fuzz target definitions (package:function)
 readonly NON_CRASHING_FUZZ_TARGETS=(
@@ -116,7 +112,7 @@ check_issue_contains_string() {
 
   # Fetch issues from GitHub API
   local issues
-  issues=$(curl -s \
+  issues=$(curl -s -H "Authorization: token ${GO_FUZZING_EXAMPLE_AUTH_TOKEN}" \
     "https://api.github.com/repos/${owner}/${repo}/issues")
 
   # Check if any issue body contains the target string
@@ -185,28 +181,126 @@ echo "Starting fuzzing process (timeout: ${MAKE_TIMEOUT})..."
 mkdir -p "${FUZZ_RESULTS_PATH}"
 MAKE_LOG="${FUZZ_RESULTS_PATH}/make_run.log"
 
-# Run make run under timeout, capturing stdout+stderr into MAKE_LOG.
-timeout -s INT --preserve-status "${MAKE_TIMEOUT}" make run ARGS="${ARGS}" 2>&1 | tee "${MAKE_LOG}"
-status=${PIPESTATUS[0]}
+if [[ ${MODE} == "k8s" ]]; then
+  echo "Running in Kubernetes mode..."
 
-# Handle exit codes:
-#   130 → timeout sent SIGINT; treat as expected termination
-#   any other non-zero → unexpected error
-if [[ ${status} -ne 130 ]]; then
-  echo "❌ Fuzzing exited with unexpected error (status: ${status})."
-  exit "${status}"
+  # Configuration variables
+  readonly AWS_SECRET_NAME="aws-creds"
+  readonly HELM_RELEASE_NAME="go-continuous-fuzz"
+  readonly K8S_NAMESPACE="go-continuous-fuzz-ns"
+  readonly POD_NAME="go-continuous-fuzz-pod"
+
+  # Enable Docker environment inside Minikube
+  eval $(minikube docker-env)
+
+  # Build Docker image
+  echo "Building Docker image..."
+  if ! make docker; then
+    echo "❌ Failed to build Docker image"
+    exit 1
+  fi
+
+  # Deploy Helm chart
+  echo "Installing/Upgrading Helm release..."
+  if ! helm upgrade --install "${HELM_RELEASE_NAME}" "./go-continuous-fuzz-chart" --namespace "${K8S_NAMESPACE}" --create-namespace; then
+    echo "❌ Failed to deploy Helm chart"
+    exit 1
+  fi
+
+  # Set the default namespace for kubectl commands
+  kubectl config set-context --current --namespace="${K8S_NAMESPACE}"
+
+  # Recreate AWS credentials secret
+  kubectl delete secret ${AWS_SECRET_NAME} --ignore-not-found
+
+  secret_args=(
+    --from-literal=AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
+    --from-literal=AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}"
+    --from-literal=AWS_REGION="${AWS_REGION}"
+  )
+  if [[ -n "${AWS_SESSION_TOKEN:-}" ]]; then
+    secret_args+=(--from-literal=AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN}")
+  fi
+
+  if ! kubectl create secret generic "${AWS_SECRET_NAME}" "${secret_args[@]}"; then
+    echo "❌ Failed to create AWS credentials secret"
+    exit 1
+  fi
+
+  # Apply additional K8s resources
+  echo "Applying manifests..."
+  # Substitute the GitHub token into the ConfigMap manifest and apply it to the cluster
+  if ! sed "s|\${GO_FUZZING_EXAMPLE_AUTH_TOKEN}|${GO_FUZZING_EXAMPLE_AUTH_TOKEN}|g" ./manifests/configmap.yaml | kubectl apply -f -; then
+    echo "❌ Failed to apply configmap.yaml"
+    exit 1
+  fi
+
+  for manifest in pvc.yaml pod.yaml; do
+    if ! kubectl apply -f "./manifests/${manifest}"; then
+      echo "❌ Failed to apply ${manifest}"
+      exit 1
+    fi
+  done
+
+  # Wait for the pod to be ready
+  echo "Waiting for pod '${POD_NAME}' to be ready..."
+  if ! kubectl wait --for=condition=Ready pod/"${POD_NAME}" --timeout=60s; then
+    echo "❌ Pod '${POD_NAME}' did not become ready in time"
+    kubectl describe pod "${POD_NAME}"
+    exit 1
+  fi
+
+  # Stream logs with timeout
+  echo "Streaming logs from pod for ${MAKE_TIMEOUT} seconds..."
+  kubectl logs -f "${POD_NAME}" &
+  sleep "${MAKE_TIMEOUT}"
+
+  # Gracefully stop the fuzzing process
+  echo "Stopping fuzzing process in pod..."
+  if ! kubectl exec "${POD_NAME}" -- pkill -SIGINT -f go-continuous-fuzz; then
+    echo "❌ Failed to send SIGINT to go-continuous-fuzz. Process may have exited early."
+    exit 1
+  fi
+  sleep 20s
+
+  # Collect final logs
+  kubectl logs "${POD_NAME}" >>"${MAKE_LOG}"
+
+  # Clean up pod
+  kubectl delete pod "${POD_NAME}" --ignore-not-found
+
+else
+  echo "Running in Docker mode..."
+
+  # Command-line flags for fuzzing process configuration
+  ARGS="\
+--project.src-repo=${PROJECT_SRC_PATH} \
+--project.s3-bucket-name=${BUCKET_NAME} \
+--fuzz.sync-frequency=${SYNC_FREQUENCY} \
+--fuzz.crash-repo=${PROJECT_SRC_PATH} \
+--fuzz.num-workers=3 \
+--fuzz.pkgs-path=parser \
+--fuzz.pkgs-path=stringutils \
+--fuzz.pkgs-path=tree"
+
+  # Run make run under timeout, capturing stdout+stderr into MAKE_LOG.
+  timeout -s INT --preserve-status "${MAKE_TIMEOUT}" make run ARGS="${ARGS}" 2>&1 | tee "${MAKE_LOG}"
+  status=${PIPESTATUS[0]}
+
+  # Handle exit codes:
+  #   130 → timeout sent SIGINT; treat as expected termination
+  #   any other non-zero → unexpected error
+  if [[ ${status} -ne 130 ]]; then
+    echo "❌ Fuzzing exited with unexpected error (status: ${status})."
+    exit "${status}"
+  fi
 fi
 
 # List of required patterns to check in the log
-readonly REQUIRED_PATTERNS=(
+REQUIRED_PATTERNS=(
   'All workers completed early; cleaning up cycle' # due to grace period
   'Successfully downloaded and unzipped corpus'
   'Successfully zipped and uploaded corpus'
-  'msg="Fuzzing in Docker completed successfully" package=stringutils target=FuzzUnSafeReverseString'
-  'msg="Fuzzing in Docker completed successfully" package=stringutils target=FuzzReverseString'
-  'msg="Fuzzing in Docker completed successfully" package=parser target=FuzzParseComplex'
-  'msg="Fuzzing in Docker completed successfully" package=parser target=FuzzEvalExpr'
-  'msg="Fuzzing in Docker completed successfully" package=tree target=FuzzBuildTree'
   'msg="Successfully added/updated coverage report" package=stringutils target=FuzzUnSafeReverseString'
   'msg="Successfully added/updated coverage report" package=stringutils target=FuzzReverseString'
   'msg="Successfully added/updated coverage report" package=parser target=FuzzParseComplex'
@@ -218,6 +312,26 @@ readonly REQUIRED_PATTERNS=(
   'msg="Worker starting fuzz target" workerID=3'
   'msg="Per-target fuzz timeout calculated" duration=1m30s'
 )
+
+if [[ ${MODE} == "k8s" ]]; then
+  REQUIRED_PATTERNS+=(
+    'Running fuzzing jobs inside Kubernetes'
+    'msg="Fuzzing completed successfully" mode=Kubernetes package=stringutils target=FuzzUnSafeReverseString'
+    'msg="Fuzzing completed successfully" mode=Kubernetes package=stringutils target=FuzzReverseString'
+    'msg="Fuzzing completed successfully" mode=Kubernetes package=parser target=FuzzParseComplex'
+    'msg="Fuzzing completed successfully" mode=Kubernetes package=parser target=FuzzEvalExpr'
+    'msg="Fuzzing completed successfully" mode=Kubernetes package=tree target=FuzzBuildTree'
+  )
+else
+  REQUIRED_PATTERNS+=(
+    'Running fuzzing jobs in Docker container'
+    'msg="Fuzzing completed successfully" mode=Docker package=stringutils target=FuzzUnSafeReverseString'
+    'msg="Fuzzing completed successfully" mode=Docker package=stringutils target=FuzzReverseString'
+    'msg="Fuzzing completed successfully" mode=Docker package=parser target=FuzzParseComplex'
+    'msg="Fuzzing completed successfully" mode=Docker package=parser target=FuzzEvalExpr'
+    'msg="Fuzzing completed successfully" mode=Docker package=tree target=FuzzBuildTree'
+  )
+fi
 
 # Verify that worker logs contain expected entries
 echo "Verifying worker log entries in ${MAKE_LOG}..."
@@ -248,13 +362,23 @@ for group in "${REQUIRED_PATTERN_GROUPS[@]}"; do
 done
 
 # List of patterns that should NOT be present in the log
-readonly FORBIDDEN_PATTERNS=(
+FORBIDDEN_PATTERNS=(
   'level=ERROR'
   'msg="Worker starting fuzz target" workerID=4'
   'Cycle duration complete; initiating cleanup.'
   'Corpus object not found. Starting with empty corpus.'
   'warning: starting with empty corpus'
 )
+
+if [[ ${MODE} == "k8s" ]]; then
+  FORBIDDEN_PATTERNS+=(
+    'Running fuzzing jobs in Docker container'
+  )
+else
+  FORBIDDEN_PATTERNS+=(
+    'Running fuzzing jobs inside Kubernetes'
+  )
+fi
 
 # Verify that worker logs do not contain forbidden entries
 echo "Verifying absence of forbidden log entries in ${MAKE_LOG}..."
@@ -334,7 +458,8 @@ for crash in "${required_crashes[@]}"; do
 done
 
 # Verify the expected number of open issues in the crash repo
-issue_count=$(curl -s "https://api.github.com/repos/go-continuous-fuzz/go-fuzzing-example/issues" | jq length)
+issue_count=$(curl -s -H "Authorization: token ${GO_FUZZING_EXAMPLE_AUTH_TOKEN}" \
+  "https://api.github.com/repos/go-continuous-fuzz/go-fuzzing-example/issues" | jq length)
 if [[ "${issue_count}" -ne 3 ]]; then
   echo "❌ ERROR: Expected 3 open issues, but found ${issue_count}"
   exit 1

@@ -34,9 +34,16 @@ test: unit-test e2e-test
 unit-test:
 	go test -v -race ./...
 
-#? e2e-test: Run e2e(integration) tests
-e2e-test:
-	./scripts/e2e_test.sh
+#? e2e-test: Run e2e(integration) tests for both Docker and Kubernetes setups
+e2e-test: e2e-test-docker e2e-test-k8s
+
+#? e2e-test-docker: Run e2e(integration) tests for Docker setup
+e2e-test-docker:
+	./scripts/e2e_test.sh docker
+
+#? e2e-test-k8s: Run e2e(integration) for Kubernetes setup
+e2e-test-k8s:
+	./scripts/e2e_test.sh k8s
 
 #? cover: Generate the test coverage
 cover:

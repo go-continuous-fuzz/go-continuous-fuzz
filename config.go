@@ -19,6 +19,10 @@ const (
 	// located.
 	TmpProjectDir = "project"
 
+	// TmpReportDir is the temporary directory where the coverage reports
+	// are located
+	TmpReportDir = "reports"
+
 	// ConfigFilename is the filename for the go-continuous-fuzz
 	// configuration file.
 	ConfigFilename = "go-continuous-fuzz.conf"
@@ -76,6 +80,10 @@ type Project struct {
 
 	// CorpusKey is the S3 object key under which the corpus is stored.
 	CorpusKey string
+
+	// ReportDir contains the absolute path to the directory where the
+	// coverage reports are located.
+	ReportDir string
 }
 
 // Fuzz defines all fuzzing-related flags and defaults, including the Git
@@ -161,6 +169,7 @@ func loadConfig() (*Config, error) {
 	cfg.Project.SrcDir = filepath.Join(tmpDirPath, TmpProjectDir)
 	cfg.Project.CorpusDir = filepath.Join(tmpDirPath,
 		fmt.Sprintf("%s_corpus", repo))
+	cfg.Project.ReportDir = filepath.Join(tmpDirPath, TmpReportDir)
 
 	return &cfg, nil
 }

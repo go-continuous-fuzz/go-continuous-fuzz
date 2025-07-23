@@ -7,11 +7,12 @@ set -eux
 # Temporary Variables
 readonly PROJECT_SRC_PATH="https://oauth2:${GO_FUZZING_EXAMPLE_AUTH_TOKEN}@github.com/go-continuous-fuzz/go-fuzzing-example.git"
 readonly SYNC_FREQUENCY="3m"
-readonly MAKE_TIMEOUT="270s"
+readonly MAKE_TIMEOUT="330s"
 
 # Use test workspace directory
 readonly TEST_WORKDIR=$(mktemp -dt "test-go-continuous-fuzz-XXXXXX")
 readonly PROJECT_DIR="${TEST_WORKDIR}/project"
+readonly REPORT_DIR="${TEST_WORKDIR}/reports"
 readonly CORPUS_DIR_NAME="go-fuzzing-example_corpus"
 readonly CORPUS_ZIP_NAME="${CORPUS_DIR_NAME}.zip"
 readonly CORPUS_DIR_PATH="${TEST_WORKDIR}/${CORPUS_DIR_NAME}"
@@ -33,6 +34,15 @@ ARGS="\
 readonly NON_CRASHING_FUZZ_TARGETS=(
   "parser:FuzzEvalExpr"
   "stringutils:FuzzReverseString"
+)
+
+# All fuzz target definitions (package:function)
+readonly ALL_FUZZ_TARGETS=(
+  "parser:FuzzEvalExpr"
+  "parser:FuzzParseComplex"
+  "stringutils:FuzzReverseString"
+  "stringutils:FuzzUnSafeReverseString"
+  "tree:FuzzBuildTree"
 )
 
 # ====== FUNCTION DEFINITIONS ======
@@ -118,11 +128,10 @@ check_issue_contains_string() {
   return 0
 }
 
-# Cleans up temporary workspace and S3 bucket
+# Cleans up temporary workspace
 cleanup() {
   echo "Cleaning up resources..."
   rm -rf "${TEST_WORKDIR}"
-  aws s3 rb "s3://${BUCKET_NAME}" --force
 }
 
 # ====== MAIN EXECUTION ======
@@ -140,9 +149,16 @@ mkdir -p ${CORPUS_DIR_PATH}
 curl -L https://codeload.github.com/go-continuous-fuzz/go-fuzzing-example/tar.gz/main |
   tar -xz --strip-components=2 -C ${CORPUS_DIR_PATH} go-fuzzing-example-main/seed_corpus
 
-# Create the S3 bucket and upload the zipped corpus
+# Create the S3 bucket (if not already) and upload the zipped corpus
 echo "Creating S3 bucket and uploading corpus..."
-aws s3 mb s3://${BUCKET_NAME}
+if ! aws s3api head-bucket --bucket "${BUCKET_NAME}"; then
+  echo "Bucket ${BUCKET_NAME} not found—creating it now."
+  aws s3 mb "s3://${BUCKET_NAME}"
+else
+  echo "Bucket ${BUCKET_NAME} already exists, skipping creation."
+  # Remove all the bucket contents
+  aws s3 rm "s3://${BUCKET_NAME}" --recursive
+fi
 (
   cd "${TEST_WORKDIR}"
   zip -r ${CORPUS_ZIP_NAME} ${CORPUS_DIR_NAME}
@@ -191,6 +207,11 @@ readonly REQUIRED_PATTERNS=(
   'msg="Fuzzing in Docker completed successfully" package=parser target=FuzzParseComplex'
   'msg="Fuzzing in Docker completed successfully" package=parser target=FuzzEvalExpr'
   'msg="Fuzzing in Docker completed successfully" package=tree target=FuzzBuildTree'
+  'msg="Successfully added/updated coverage report" package=stringutils target=FuzzUnSafeReverseString'
+  'msg="Successfully added/updated coverage report" package=stringutils target=FuzzReverseString'
+  'msg="Successfully added/updated coverage report" package=parser target=FuzzParseComplex'
+  'msg="Successfully added/updated coverage report" package=parser target=FuzzEvalExpr'
+  'msg="Successfully added/updated coverage report" package=tree target=FuzzBuildTree'
   'Shutdown initiated during fuzzing cycle; performing final cleanup.'
   'msg="Worker starting fuzz target" workerID=1'
   'msg="Worker starting fuzz target" workerID=2'
@@ -251,6 +272,11 @@ echo "Downloading updated corpus from S3..."
   aws s3 cp s3://${BUCKET_NAME}/${CORPUS_ZIP_NAME} "${CORPUS_ZIP_NAME}"
   unzip -o "${CORPUS_ZIP_NAME}"
 )
+
+# Download master state report from S3
+echo "Downloading master state report from S3..."
+mkdir -p "${REPORT_DIR}"
+aws s3 cp s3://${BUCKET_NAME}/state.json "${REPORT_DIR}"
 
 # Capture final corpus state
 echo "Recording final corpus state..."
@@ -313,6 +339,88 @@ if [[ "${issue_count}" -ne 3 ]]; then
   echo "❌ ERROR: Expected 3 open issues, but found ${issue_count}"
   exit 1
 fi
+
+# Verify coverage reports
+echo "Checking coverage reports..."
+
+# Check index.html file in BUCKET_NAME
+if ! aws s3api head-object --bucket "${BUCKET_NAME}" --key "index.html"; then
+  echo "❌ ERROR: Missing daily coverage report: index.html"
+  exit 1
+fi
+
+# Ensure only the expected number of top-level files exist in S3
+num_s3_files=$(aws s3 ls "s3://${BUCKET_NAME}" | wc -l)
+if [[ "${num_s3_files}" -ne 4 ]]; then
+  echo "❌ ERROR: Unexpected number of files in ${BUCKET_NAME} (found: ${num_s3_files}, expected: 4)"
+  exit 1
+fi
+
+# Compare state.json content
+if ! diff "${REPORT_DIR}/state.json" "./testdata/state.json"; then
+  echo "❌ ERROR: state.json does not match expected content"
+  exit 1
+fi
+
+# Ensure expected number of target files in BUCKET_NAME/targets/
+num_target_files=$(aws s3 ls "s3://${BUCKET_NAME}/targets/" --recursive | wc -l)
+if [[ "${num_target_files}" -ne 15 ]]; then
+  echo "❌ ERROR: Unexpected number of files in ${BUCKET_NAME}/targets (found: ${num_target_files}, expected: 15)"
+  exit 1
+fi
+
+# Check that each target has the expected .html, .json, and daily coverage HTML file
+for entry in "${ALL_FUZZ_TARGETS[@]}"; do
+  IFS=':' read -r pkg target <<<"${entry}"
+  base="${pkg}/${target}"
+
+  # Check summary .json and .html
+  if ! aws s3api head-object --bucket "${BUCKET_NAME}" --key "targets/${base}.json"; then
+    echo "❌ ERROR: Missing ${base}.json in targets/"
+    exit 1
+  fi
+  if ! aws s3api head-object --bucket "${BUCKET_NAME}" --key "targets/${base}.html"; then
+    echo "❌ ERROR: Missing ${base}.html in targets/"
+    exit 1
+  fi
+
+  files=$(aws s3api list-objects-v2 \
+    --bucket "${BUCKET_NAME}" \
+    --prefix "targets/${base}/" \
+    --query 'Contents[].Key' \
+    --output text)
+
+  # Count how many files are found
+  file_count=$(echo "${files}" | wc -w)
+
+  if [[ "${file_count}" -ne 1 ]]; then
+    echo "❌ ERROR: Expected exactly one file under targets/${base}/, found ${file_count}"
+    exit 1
+  fi
+
+  # Get the last modified time of the only file
+  last_modified=$(aws s3api head-object \
+    --bucket "${BUCKET_NAME}" \
+    --key "${files}" \
+    --query "LastModified" \
+    --output text)
+
+  if [[ -z "${last_modified}" ]]; then
+    echo "❌ ERROR: Failed to retrieve metadata for '${files}'"
+    exit 1
+  fi
+
+  # Compare last modified time to now
+  DATE_BIN=$(command -v gdate || command -v date) # Use GNU date if available, fallback to standard date for broader compatibility
+  last_epoch=$("${DATE_BIN}" -d "${last_modified}" +%s)
+  now_epoch=$("${DATE_BIN}" +%s)
+  diff_seconds=$(( now_epoch - last_epoch ))
+
+  if (( diff_seconds > 180 )); then
+    echo "❌ ERROR: File '${files}' is older than 180 seconds (${diff_seconds} seconds ago)"
+    exit 1
+  fi
+done
 
 echo "✅ Fuzzing process completed successfully."
 exit 0

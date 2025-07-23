@@ -129,8 +129,8 @@ func (wg *WorkerGroup) runWorker(workerID int) error {
 
 // executeFuzzTarget runs the specified fuzz target for a package for a given
 // duration using Docker. It sets up the necessary environment, starts the
-// container, streams its output, and creates a GitHub issue reporting the crash
-// (if any).
+// container, streams its output, creates a GitHub issue reporting the crash
+// (if any), and updates the coverage report.
 func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 	wg.logger.Info("Executing fuzz target in Docker", "package", pkg,
 		"target", target, "duration", wg.taskTimeout)
@@ -207,14 +207,16 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 
 	case fuzzCrash := <-fuzzCrashChan:
 		// Create a GitHub client and report the fuzz crash.
-		gh, err := NewGitHubRepo(context.Background(), wg.logger.With(
-			"target", target).With("package", pkg),
-			wg.cfg.Fuzz.CrashRepo)
+		gh, err := NewGitHubRepo(wg.ctx, wg.logger.With("target",
+			target).With("package", pkg), wg.cfg.Fuzz.CrashRepo)
 		if err != nil {
 			return fmt.Errorf("initializing GitHub client: %w", err)
 		}
 
 		if err := gh.handleCrash(pkg, target, fuzzCrash); err != nil {
+			if wg.ctx.Err() != nil {
+				return nil
+			}
 			return fmt.Errorf("handling fuzz crash: %w", err)
 		}
 
@@ -232,6 +234,18 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 	}
 
 	wg.logger.Info("Fuzzing in Docker completed successfully", "package",
+		pkg, "target", target)
+
+	err = updateReport(wg.ctx, pkg, target, wg.cfg, wg.logger)
+	if err != nil {
+		if wg.ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("failed to add coverage report for package "+
+			"%s, target %s: %w", pkg, target, err)
+	}
+
+	wg.logger.Info("Successfully added/updated coverage report", "package",
 		pkg, "target", target)
 
 	return nil

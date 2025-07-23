@@ -15,6 +15,10 @@ import (
 )
 
 const (
+	// InClusterWorkspacePath is the temporary in‑cluster path where the
+	// fuzzing workspace is located.
+	InClusterWorkspacePath = "/var/lib/go-continuous-fuzz"
+
 	// TmpProjectDir is the temporary directory where the project is
 	// located.
 	TmpProjectDir = "project"
@@ -39,10 +43,10 @@ const (
 	// for the fuzz corpus.
 	ContainerCorpusPath = "/go-continuous-fuzz-corpus"
 
-	// ContainerGracePeriod specifies the grace period to account for
-	// container startup overhead and ensures that all targets have
+	// FuzzGracePeriod specifies the grace period to account for
+	// container/pod startup overhead and ensures that all targets have
 	// sufficient time to complete.
-	ContainerGracePeriod = 20 * time.Second
+	FuzzGracePeriod = 20 * time.Second
 )
 
 var (
@@ -88,7 +92,8 @@ type Project struct {
 
 // Fuzz defines all fuzzing-related flags and defaults, including the Git
 // repository URLs of the project where issues will be opened, which packages to
-// fuzz, timeout settings, and concurrency parameters.
+// fuzz, timeout settings, concurrency parameters, whether to run in‑cluster
+// or in Docker and k8s namespace.
 //
 //nolint:lll
 type Fuzz struct {
@@ -99,6 +104,10 @@ type Fuzz struct {
 	SyncFrequency time.Duration `long:"sync-frequency" description:"Duration between consecutive fuzzing cycles" default:"24h"`
 
 	NumWorkers int `long:"num-workers" description:"Number of concurrent fuzzing workers" default:"1"`
+
+	InCluster bool `long:"in-cluster" description:"Whether to run inside a Kubernetes cluster. Defaults to Docker if unset."`
+
+	NameSpace string `long:"namespace" description:"Kubernetes namespace to use (used when --in-cluster is set)" default:"default"`
 }
 
 // Config encapsulates all top-level configuration parameters required to run
@@ -162,9 +171,14 @@ func loadConfig() (*Config, error) {
 	cfg.Project.CorpusKey = fmt.Sprintf("%s_corpus.zip", repo)
 
 	// Set the absolute path to the temporary project directory.
-	tmpDirPath, err := os.MkdirTemp("", "go-continuous-fuzz-")
-	if err != nil {
-		return nil, err
+	var tmpDirPath string
+	if cfg.Fuzz.InCluster {
+		tmpDirPath = InClusterWorkspacePath
+	} else {
+		tmpDirPath, err = os.MkdirTemp("", "go-continuous-fuzz-")
+		if err != nil {
+			return nil, err
+		}
 	}
 	cfg.Project.SrcDir = filepath.Join(tmpDirPath, TmpProjectDir)
 	cfg.Project.CorpusDir = filepath.Join(tmpDirPath,

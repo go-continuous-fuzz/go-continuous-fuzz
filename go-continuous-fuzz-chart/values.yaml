@@ -1,0 +1,9 @@
+serviceAccount:
+  create: true
+  automount: true
+  name: "go-continuous-fuzz-sa"
+
+rbac:
+  create: true
+  roleName: "go-continuous-fuzz-role"
+  roleBindingName: "go-continuous-fuzz-rb"

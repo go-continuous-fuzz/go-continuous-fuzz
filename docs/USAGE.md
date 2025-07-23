@@ -12,6 +12,8 @@ You can configure **go-continuous-fuzz** using either conifg file or command-lin
 | `fuzz.pkgs-path`         | List of package paths to fuzz                                | Yes      | —       |
 | `fuzz.sync-frequency`    | Duration between consecutive fuzzing cycles                  | No       | 24h     |
 | `fuzz.num-workers`       | Number of concurrent fuzzing workers                         | No       | 1       |
+| `fuzz.in-cluster`        | Run in-cluster (Kubernetes). Defaults to Docker. if unset.   | No       | False   |
+| `fuzz.namespace`         | Kubernetes namespace to use (used with --in-cluster).        | No       | default |
 
 **Repository URL formats:**
 For `project.src-repo`:
@@ -78,6 +80,38 @@ The file structure of the coverage reports is as follows:
   - A `.json` history file tracking daily coverage changes for each package/target.
   - Subdirectories structured as `pkg/fuzzTarget/` containing daily HTML coverage reports (e.g., `2025-07-12.html`) generated via `go tool cover`.
 
+**Running in Kubernetes Guidelines:**
+
+When the flag `--fuzz.in-cluster` is set, `go-continuous-fuzz` runs inside the Kubernetes cluster. This means the application must be executed within a Pod.
+Before launching the Pod, install the standard Helm chart to set up the necessary Kubernetes resources:
+
+```sh
+helm upgrade --install "${HELM_RELEASE_NAME}" "./go-continuous-fuzz-chart" --namespace "${K8S_NAMESPACE}"
+```
+
+The project uses specific fixed resource names for in-cluster fuzzing. These include:
+
+- **ServiceAccount**: `go-continuous-fuzz-sa`
+- **PersistentVolumeClaim (PVC)**: `go-continuous-fuzz-pvc`
+
+Make sure to use these exact names when creating the Pod, ConfigMap/Secret, and PVC.
+Each fuzz target requires **2 GB of memory** and **1 CPU**. Ensure that your PVC requests adequate storage, or the application may behave unexpectedly (e.g., fuzzing jobs remain pending and then stop).
+Since the PVC is shared across multiple pods/jobs, the `accessModes` for the PVC must be set to `ReadWriteMany`. Make sure that the underlying StorageClass supports the `ReadWriteMany` access mode.
+We use a standard volume mount path inside the cluster:
+
+```
+mountPath: /var/lib/go-continuous-fuzz
+```
+
+Additionally:
+
+- AWS credentials must be provided as Kubernetes Secrets, which should be mounted into the Pod as environment variables or as files using a volume mount.
+- The configuration file must be mounted (via ConfigMap or Secret) to the path `/root/.go-continuous-fuzz/` with the filename `go-continuous-fuzz.conf`.
+
+For example manifests (Pod, PVC, ConfigMap), refer to the [manifests directory](../manifests/). These are primarily intended for testing purposes, but you may use your own setup as long as it follows the guidelines described above.
+
+Note: In the Docker setup, each fuzz target runs in a separate Docker container, with a fixed resource limit of **2 GB of memory** and **1 CPU** per container. In the Kubernetes setup, each fuzz target runs in a separate Pod with the same fixed resource constraints. This isolation ensures that `go-continuous-fuzz` can handle out-of-memory (OOM) errors in one fuzz target without affecting the execution of others.
+
 ## How It Works
 
 1. **Configuration:**  
@@ -97,6 +131,9 @@ The file structure of the coverage reports is as follows:
 
 6. **Coverage Reports:**
    For each fuzz target, coverage reports are generated and uploaded to the configured AWS S3 bucket (`project.s3-bucket-name`). The bucket can be optionally configured for static website hosting to view reports via a browser.
+
+7. **Fuzzing Execution Modes:**
+   Fuzzing can be run locally, where each fuzz target runs in a separate Docker container. Alternatively, you can use the `--fuzz.in-cluster` flag to run inside a Kubernetes cluster, where each fuzz target is executed as a separate Kubernetes Job, spawning individual Pods.
 
 ## Running go-continuous-fuzz
 
@@ -120,7 +157,11 @@ The file structure of the coverage reports is as follows:
      --fuzz.pkgs-path=<path/to/pkg>
      --fuzz.sync-frequency=<time>
      --fuzz.num-workers=<number_of_workers>
+     --fuzz.in-cluster
+     --fuzz.namespace=<namespace>
    ```
+
+Note: Ensure the target namespace `<namespace>` exists prior to running this command.
 
 3. **Run the Fuzzing Engine:**  
    With your config file configured, start the fuzzing process. Run:

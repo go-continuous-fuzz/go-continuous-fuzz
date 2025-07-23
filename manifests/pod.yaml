@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: go-continuous-fuzz-pod
+  namespace: go-continuous-fuzz-ns
+spec:
+  serviceAccountName: go-continuous-fuzz-sa
+  containers:
+    - name: go-continuous-fuzz-container
+      image: go-continuous-fuzz
+      imagePullPolicy: Never
+      envFrom:
+        - secretRef:
+            name: aws-creds
+      volumeMounts:
+        - name: config
+          mountPath: /root/.go-continuous-fuzz/
+        - name: shared
+          mountPath: /var/lib/go-continuous-fuzz
+  volumes:
+    - name: config
+      configMap:
+        name: go-continuous-fuzz-config
+    - name: shared
+      persistentVolumeClaim:
+        claimName: go-continuous-fuzz-pvc
+  restartPolicy: Never

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"log/slog"
@@ -39,7 +40,20 @@ func run() int {
 		logger.Error("Failed to load configuration", "error", err)
 		return 1
 	}
-	defer cleanupWorkspace(logger, cfg)
+
+	// Announce where the fuzzing workload will execute and where its
+	// workspace lives.
+	if cfg.Fuzz.InCluster {
+		logger.Info("Running fuzzing jobs inside Kubernetes",
+			"workspacePath", InClusterWorkspacePath)
+	} else {
+		logger.Info("Running fuzzing jobs in Docker container",
+			"workspacePath", filepath.Dir(cfg.Project.SrcDir))
+
+		// Perform workspace cleanup when running in Docker (i.e., not
+		// in‑cluster).
+		defer cleanupWorkspace(logger, cfg)
+	}
 
 	// Create a cancellable context to manage the application's lifecycle.
 	appCtx, cancelApp := context.WithCancel(context.Background())

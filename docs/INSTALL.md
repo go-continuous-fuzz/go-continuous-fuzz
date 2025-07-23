@@ -73,6 +73,9 @@ make docker-run VOLUME_MOUNTS=<required>
 make test
 ```
 
+**Note:** Ensure that the GitHub auth token is set as an environment variable in `GO_FUZZING_EXAMPLE_AUTH_TOKEN`.
+Also, Ensure the following AWS credentials are set as environment variables when testing Kubernetes mode: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION`. If you are using temporary credentials (e.g., from an IAM role or `aws sts assume-role`), also set `AWS_SESSION_TOKEN`.
+
 ## Additional Information
 
 You can install the compiled binary to your Go bin directory (`$GOBIN`, or `$HOME/go/bin` if `GOBIN` is not set) using the following command:

@@ -10,6 +10,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
@@ -91,9 +92,10 @@ func (s3s *S3Store) downloadObject(outPath, key string) (bool, error) {
 }
 
 // uploadObject uploads the content read from fileReader to the S3Store's bucket
-// at the specified key, setting the Content-Type header to contentType.
+// at the specified key, setting the Content-Type header to contentType, and
+// adds the provided metadata (if any).
 func (s3s *S3Store) uploadObject(fileReader io.Reader, key,
-	contentType string) error {
+	contentType string, metadata map[string]string) error {
 
 	uploader := manager.NewUploader(s3s.client)
 	_, err := uploader.Upload(s3s.ctx, &s3.PutObjectInput{
@@ -101,6 +103,7 @@ func (s3s *S3Store) uploadObject(fileReader io.Reader, key,
 		Key:         &key,
 		Body:        fileReader,
 		ContentType: &contentType,
+		Metadata:    metadata,
 	})
 	if err != nil {
 		return fmt.Errorf("uploading s3://%s/%s: %w", s3s.bucket, key,
@@ -111,6 +114,41 @@ func (s3s *S3Store) uploadObject(fileReader io.Reader, key,
 		key)
 
 	return nil
+}
+
+// getLastMinimizedTime returns the "last-minimized" timestamp from the S3
+// object's metadata. If the object does not exist or the "last-minimized"
+// metadata is missing or empty, it returns the current time.
+func (s3s *S3Store) getLastMinimizedTime() (time.Time, error) {
+	resp, err := s3s.client.HeadObject(s3s.ctx, &s3.HeadObjectInput{
+		Bucket: &s3s.bucket,
+		Key:    &s3s.zipKey,
+	})
+	if err != nil {
+		var nsk *types.NoSuchKey
+		if errors.As(err, &nsk) {
+			// Object doesn't exist, so default to current time
+			return time.Now(), nil
+		}
+		return time.Time{}, fmt.Errorf("fetching metadata for key %q: "+
+			"%w", s3s.zipKey, err)
+	}
+
+	lastMinStr, ok := resp.Metadata["last-minimized"]
+	if !ok || lastMinStr == "" {
+		// If the last-minimized metadata is missing, default to the
+		// current time; otherwise, the user would have to manually add
+		// the metadata when uploading some useful corpus.
+		return time.Now(), nil
+	}
+
+	lastMinTime, err := time.Parse(time.RFC3339, lastMinStr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid last-minimized "+
+			"metadata for key %q: %w", s3s.zipKey, err)
+	}
+
+	return lastMinTime, nil
 }
 
 // unzip extracts the contents of the zip archive specified by zipPath into the
@@ -142,8 +180,8 @@ func (s3s *S3Store) unzip() error {
 				return nil
 			}
 
-			if err := os.MkdirAll(filepath.Dir(fullPath),
-				0755); err != nil {
+			err := EnsureDirExists(filepath.Dir(fullPath))
+			if err != nil {
 				return fmt.Errorf("creating parent dir for "+
 					"%q: %w", fullPath, err)
 			}
@@ -263,7 +301,7 @@ func (s3s *S3Store) zipDir(zipWriter *io.PipeWriter) error {
 
 // uploadCorpusAndReports streams corpusDir as a ZIP archive, uploads it to S3,
 // and then uploads any generated coverage reports.
-func (s3s *S3Store) uploadCorpusAndReports() error {
+func (s3s *S3Store) uploadCorpusAndReports(lastMinTime time.Time) error {
 	// Stream the ZIP archive in a goroutine.
 	pr, pw := io.Pipe()
 	go func() {
@@ -274,9 +312,12 @@ func (s3s *S3Store) uploadCorpusAndReports() error {
 		pw.CloseWithError(err)
 	}()
 
-	if err := s3s.uploadObject(pr, s3s.zipKey, "application/zip"); err !=
-		nil {
-
+	// Now upload the zipped corpus with updated metadata.
+	err := s3s.uploadObject(pr, s3s.zipKey, "application/zip",
+		map[string]string{
+			"last-minimized": lastMinTime.Format(time.RFC3339),
+		})
+	if err != nil {
 		return fmt.Errorf("corpus upload failed: %w", err)
 	}
 
@@ -397,7 +438,8 @@ func (s3s *S3Store) uploadReports() error {
 
 		// Upload the file to S3 with the appropriate content type
 		contentType := detectContentType(path)
-		if err = s3s.uploadObject(file, key, contentType); err != nil {
+		err = s3s.uploadObject(file, key, contentType, nil)
+		if err != nil {
 			return fmt.Errorf("upload report %q: %w", key, err)
 		}
 

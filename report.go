@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -331,31 +330,4 @@ func copyCorpusFiles(srcDir, dstDir string, logger *slog.Logger) error {
 	}
 
 	return nil
-}
-
-// copyFile copies the contents of a single file from source to destination path
-func copyFile(srcFile, dstFile string, logger *slog.Logger) error {
-	src, err := os.Open(srcFile)
-	if err != nil {
-		return fmt.Errorf("open source file %q: %w", srcFile, err)
-	}
-	defer func() {
-		if err := src.Close(); err != nil {
-			logger.Error("Failed to close file", "error", err)
-		}
-	}()
-
-	dst, err := os.Create(dstFile)
-	if err != nil {
-		return fmt.Errorf("create destination file %q: %w", dstFile,
-			err)
-	}
-	defer func() {
-		if err := dst.Close(); err != nil {
-			logger.Error("Failed to close file", "error", err)
-		}
-	}()
-
-	_, err = io.Copy(dst, src)
-	return err
 }

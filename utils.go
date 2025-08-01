@@ -154,10 +154,11 @@ func formatCrashReport(failingLog, failingInputString string) string {
 }
 
 // runGoCommand executes a `go` command with the given arguments in the
-// specified working directory. It returns the standard output as a string or an
-// error if the command fails.
-func runGoCommand(ctx context.Context, workDir string, args []string) (string,
-	error) {
+// specified working directory. It appends any additional environment variables
+// provided via extraEnv to the current environment and returns the standard
+// output as a string or an error if the command fails.
+func runGoCommand(ctx context.Context, workDir string, args []string,
+	extraEnv ...string) (string, error) {
 
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = workDir
@@ -165,6 +166,7 @@ func runGoCommand(ctx context.Context, workDir string, args []string) (string,
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.Env = append(os.Environ(), extraEnv...)
 
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("go command failed: %w\nStderr: %s", err,

@@ -12,6 +12,7 @@ go-continuous-fuzz is a Go native fuzzing tool that automatically detects and ru
 - **Corpus Persistence:** Saves the input corpus for each fuzz target to a specified AWS S3 bucket, ensuring that test cases are preserved for future runs.
 - **Crash Reporting:** Automatically open a GitHub issue on crash, including the error logs and failing input data.
 - **Coverage Reports:** Saves the generated coverage reports for each fuzz target to the specified AWS S3 bucket, enabling coverage history comparison to help improve fuzz targets.
+- **Corpus Minimization:** Periodically remove inputs that do not improve or reduce coverage to prevent corpus bloat.
 
 ## Deployment & Execution
 

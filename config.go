@@ -88,7 +88,7 @@ type Project struct {
 
 // Fuzz defines all fuzzing-related flags and defaults, including the Git
 // repository URLs of the project where issues will be opened, which packages to
-// fuzz, timeout settings, and concurrency parameters.
+// fuzz, timeout settings, concurrency parameters and corpus minimize interval.
 //
 //nolint:lll
 type Fuzz struct {
@@ -99,6 +99,8 @@ type Fuzz struct {
 	SyncFrequency time.Duration `long:"sync-frequency" description:"Duration between consecutive fuzzing cycles" default:"24h"`
 
 	NumWorkers int `long:"num-workers" description:"Number of concurrent fuzzing workers" default:"1"`
+
+	CorpusMinimizeInterval time.Duration `long:"corpus-minimize-interval" description:"Interval between consecutive corpus minimizations" default:"7d"`
 }
 
 // Config encapsulates all top-level configuration parameters required to run

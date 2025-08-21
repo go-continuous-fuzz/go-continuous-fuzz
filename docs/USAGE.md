@@ -4,14 +4,15 @@
 
 You can configure **go-continuous-fuzz** using either conifg file or command-line flags. All options are listed below:
 
-| Configuration Variable   | Description                                                  | Required | Default |
-| ------------------------ | ------------------------------------------------------------ | -------- | ------- |
-| `project.src-repo`       | Git repo URL of the project to fuzz                          | Yes      | —       |
-| `project.s3-bucket-name` | Name of the S3 bucket where the seed corpus will be stored   | Yes      | —       |
-| `fuzz.crash-repo`        | Git repository URL where issues are created for fuzz crashes | Yes      | —       |
-| `fuzz.pkgs-path`         | List of package paths to fuzz                                | Yes      | —       |
-| `fuzz.sync-frequency`    | Duration between consecutive fuzzing cycles                  | No       | 24h     |
-| `fuzz.num-workers`       | Number of concurrent fuzzing workers                         | No       | 1       |
+| Configuration Variable          | Description                                                  | Required | Default |
+| ------------------------------- | ------------------------------------------------------------ | -------- | ------- |
+| `project.src-repo`              | Git repo URL of the project to fuzz                          | Yes      | —       |
+| `project.s3-bucket-name`        | Name of the S3 bucket where the seed corpus will be stored   | Yes      | —       |
+| `fuzz.crash-repo`               | Git repository URL where issues are created for fuzz crashes | Yes      | —       |
+| `fuzz.pkgs-path`                | List of package paths to fuzz                                | Yes      | —       |
+| `fuzz.sync-frequency`           | Duration between consecutive fuzzing cycles                  | No       | 24h     |
+| `fuzz.num-workers`              | Number of concurrent fuzzing workers                         | No       | 1       |
+| `fuzz.corpus-minimize-interval` | Interval between consecutive corpus minimizations            | No       | 7d      |
 
 **Repository URL formats:**
 For `project.src-repo`:
@@ -98,6 +99,9 @@ The file structure of the coverage reports is as follows:
 6. **Coverage Reports:**
    For each fuzz target, coverage reports are generated and uploaded to the configured AWS S3 bucket (`project.s3-bucket-name`). The bucket can be optionally configured for static website hosting to view reports via a browser.
 
+7. **Coprus Minimization:**
+   To prevent the corpus from becoming bloated over time, it is periodically minimized after every `fuzz.corpus-minimize-interval` where each input is evaluated and those that do not improve or reduce overall coverage are removed.
+
 ## Running go-continuous-fuzz
 
 1. **Clone the Repository**
@@ -120,6 +124,7 @@ The file structure of the coverage reports is as follows:
      --fuzz.pkgs-path=<path/to/pkg>
      --fuzz.sync-frequency=<time>
      --fuzz.num-workers=<number_of_workers>
+     --fuzz.corpus-minimize-interval=<time>
    ```
 
 3. **Run the Fuzzing Engine:**  

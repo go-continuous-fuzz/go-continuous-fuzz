@@ -7,7 +7,8 @@ set -eux
 # Temporary Variables
 readonly PROJECT_SRC_PATH="https://oauth2:${GO_FUZZING_EXAMPLE_AUTH_TOKEN}@github.com/go-continuous-fuzz/go-fuzzing-example.git"
 readonly SYNC_FREQUENCY="3m"
-readonly MAKE_TIMEOUT="330s"
+readonly CORPUS_MINIMIZE_INTERVAL="4m"
+readonly MAKE_TIMEOUT="9m"
 
 # Use test workspace directory
 readonly TEST_WORKDIR=$(mktemp -dt "test-go-continuous-fuzz-XXXXXX")
@@ -24,6 +25,7 @@ ARGS="\
 --project.src-repo=${PROJECT_SRC_PATH} \
 --project.s3-bucket-name=${BUCKET_NAME} \
 --fuzz.sync-frequency=${SYNC_FREQUENCY} \
+--fuzz.corpus-minimize-interval=${CORPUS_MINIMIZE_INTERVAL} \
 --fuzz.crash-repo=${PROJECT_SRC_PATH} \
 --fuzz.num-workers=3 \
 --fuzz.pkgs-path=parser \
@@ -212,6 +214,11 @@ readonly REQUIRED_PATTERNS=(
   'msg="Successfully added/updated coverage report" package=parser target=FuzzParseComplex'
   'msg="Successfully added/updated coverage report" package=parser target=FuzzEvalExpr'
   'msg="Successfully added/updated coverage report" package=tree target=FuzzBuildTree'
+  'msg="corpus minimization complete" target=FuzzUnSafeReverseString package=stringutils'
+  'msg="corpus minimization complete" target=FuzzReverseString package=stringutils'
+  'msg="corpus minimization complete" target=FuzzParseComplex package=parser'
+  'msg="corpus minimization complete" target=FuzzEvalExpr package=parser'
+  'msg="corpus minimization complete" target=FuzzBuildTree package=tree'
   'Shutdown initiated during fuzzing cycle; performing final cleanup.'
   'msg="Worker starting fuzz target" workerID=1'
   'msg="Worker starting fuzz target" workerID=2'
@@ -254,6 +261,7 @@ readonly FORBIDDEN_PATTERNS=(
   'Cycle duration complete; initiating cleanup.'
   'Corpus object not found. Starting with empty corpus.'
   'warning: starting with empty corpus'
+  'nondeterministic fuzz target: coverage decreased'
 )
 
 # Verify that worker logs do not contain forbidden entries

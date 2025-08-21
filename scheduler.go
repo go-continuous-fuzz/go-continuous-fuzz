@@ -20,10 +20,12 @@ import (
 //  1. Cloning the Git repository specified in cfg.Project.SrcRepo.
 //  2. Downloading corpus and reports from S3 bucket specified in
 //     cfg.Project.S3BucketName.
-//  3. Launching scheduler goroutines to execute all fuzz targets for a portion
+//  3. If the time since the last corpus minimization exceeds
+//     cfg.Fuzz.CorpusMinimizeInterval, then minimize the corpus.
+//  4. Launching scheduler goroutines to execute all fuzz targets for a portion
 //     of cfg.Fuzz.SyncFrequency.
-//  4. Cleaning up the workspace.
-//  5. Uploading the updated corpus and reports to the S3 bucket.
+//  5. Cleaning up the workspace.
+//  6. Uploading the updated corpus and reports to the S3 bucket.
 //
 // The loop repeats until the parent context is canceled. Errors in cloning or
 // target discovery are returned immediately.
@@ -65,6 +67,21 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 			return err
 		}
 
+		shouldMinimizeCorpus := false
+		// Get the last time the corpus was pruned.
+		lastMinTime, err := s3s.getLastMinimizedTime()
+		if err != nil {
+			logger.Error("Failed to get last minimized time of " +
+				"corpus; aborting scheduler")
+			return err
+		}
+		// If this last time was greater than the prune interval then
+		// corpus should minimized, so update the last minimized time.
+		if time.Since(lastMinTime) >= cfg.Fuzz.CorpusMinimizeInterval {
+			lastMinTime = time.Now()
+			shouldMinimizeCorpus = true
+		}
+
 		// 3. Create a scheduler context for this fuzz iteration.
 		schedulerCtx, cancelCycle := context.WithCancel(ctx)
 
@@ -72,11 +89,12 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 		errChan := make(chan error, 1)
 
 		// Launch the fuzz worker scheduler as a goroutine.
-		go scheduleFuzzing(schedulerCtx, logger, cfg, errChan)
+		go scheduleFuzzing(schedulerCtx, logger, cfg, errChan,
+			shouldMinimizeCorpus)
 
 		// Set up the grace period for all workers to finish their
 		// tasks.
-		gracePeriod := min(cfg.Fuzz.SyncFrequency/5, 1*time.Hour)
+		gracePeriod := min(cfg.Fuzz.SyncFrequency/3, 1*time.Hour)
 
 		// 4. Wait for either:
 		//    A) All workers finish early
@@ -121,7 +139,7 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 
 		// 5. Only upload the updated corpus and reports if the cycle
 		//    succeeded.
-		if err := s3s.uploadCorpusAndReports(); err != nil {
+		if err := s3s.uploadCorpusAndReports(lastMinTime); err != nil {
 			logger.Error("Failed to upload corpus and reports; " +
 				"aborting scheduler")
 			return err
@@ -137,7 +155,7 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 //
 // Returns an error if any worker fails.
 func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
-	errChan chan error) {
+	errChan chan error, shouldMinimizeCorpus bool) {
 
 	logger.Info("Starting fuzzing scheduler", "startTime", time.Now().
 		Format(time.RFC1123))
@@ -244,13 +262,14 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
 	// Make sure to cancel all workers if any single worker errors.
 	g, workerCtx := errgroup.WithContext(ctx)
 	wg := &WorkerGroup{
-		ctx:         workerCtx,
-		logger:      logger,
-		goGroup:     g,
-		cli:         cli,
-		cfg:         cfg,
-		taskQueue:   taskQueue,
-		taskTimeout: perTargetTimeout,
+		ctx:                  workerCtx,
+		logger:               logger,
+		goGroup:              g,
+		cli:                  cli,
+		cfg:                  cfg,
+		taskQueue:            taskQueue,
+		taskTimeout:          perTargetTimeout,
+		shouldMinimizeCorpus: shouldMinimizeCorpus,
 	}
 
 	// Start and wait for all workers to finish or for the first

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
 	"os"
@@ -154,10 +155,11 @@ func formatCrashReport(failingLog, failingInputString string) string {
 }
 
 // runGoCommand executes a `go` command with the given arguments in the
-// specified working directory. It returns the standard output as a string or an
-// error if the command fails.
-func runGoCommand(ctx context.Context, workDir string, args []string) (string,
-	error) {
+// specified working directory. It appends any additional environment variables
+// provided via extraEnv to the current environment and returns the standard
+// output as a string or an error if the command fails.
+func runGoCommand(ctx context.Context, workDir string, args []string,
+	extraEnv ...string) (string, error) {
 
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = workDir
@@ -165,6 +167,7 @@ func runGoCommand(ctx context.Context, workDir string, args []string) (string,
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	cmd.Env = append(os.Environ(), extraEnv...)
 
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("go command failed: %w\nStderr: %s", err,
@@ -172,4 +175,31 @@ func runGoCommand(ctx context.Context, workDir string, args []string) (string,
 	}
 
 	return stdout.String(), nil
+}
+
+// copyFile copies the contents of a single file from source to destination path
+func copyFile(srcFile, dstFile string, logger *slog.Logger) error {
+	src, err := os.Open(srcFile)
+	if err != nil {
+		return fmt.Errorf("open source file %q: %w", srcFile, err)
+	}
+	defer func() {
+		if err := src.Close(); err != nil {
+			logger.Error("Failed to close file", "error", err)
+		}
+	}()
+
+	dst, err := os.Create(dstFile)
+	if err != nil {
+		return fmt.Errorf("create destination file %q: %w", dstFile,
+			err)
+	}
+	defer func() {
+		if err := dst.Close(); err != nil {
+			logger.Error("Failed to close file", "error", err)
+		}
+	}()
+
+	_, err = io.Copy(dst, src)
+	return err
 }

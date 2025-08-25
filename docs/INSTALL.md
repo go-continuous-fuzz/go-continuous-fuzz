@@ -2,10 +2,10 @@
 
 ## Installation Instructions
 
-### Step 1: Install Go 1.23.9
+### Step 1: Install Go
 
 1. Visit the official Go download page: [Go Downloads](https://go.dev/dl).
-2. Download and install the appropriate version for your OS and hardware architecture.
+2. Download and install one of the stable versions for your OS and hardware architecture.
 
 ### Step 2: Add GOBIN Path to Your $PATH
 

@@ -217,7 +217,7 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
 		}
 	}()
 
-	// Pull the Docker image specified by ContainerImage ("golang:1.23.9").
+	// Pull the Docker image specified by ContainerImage.
 	reader, err := cli.ImagePull(ctx, ContainerImage,
 		image.PullOptions{})
 	if err != nil {

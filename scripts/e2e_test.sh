@@ -329,7 +329,7 @@ if [[ "${num_crash_files}" -ne 1 ]]; then
 fi
 
 required_crashes=(
-  "testing.go:1591: panic: runtime error: index out of range [6] with length 6"
+  "testing.go:1693: panic: runtime error: index out of range [6] with length 6"
   "stringutils_test.go:17: Reverse produced invalid UTF-8 string"
   "fuzzing process hung or terminated unexpectedly: exit status 2"
 )

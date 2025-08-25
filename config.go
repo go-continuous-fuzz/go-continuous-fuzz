@@ -29,7 +29,7 @@ const (
 
 	// ContainerImage specifies the Docker image to use for running the
 	// container.
-	ContainerImage = "golang:1.23.9"
+	ContainerImage = "golang:1.24.6"
 
 	// ContainerProjectPath specifies the root directory for the project
 	// inside the container.

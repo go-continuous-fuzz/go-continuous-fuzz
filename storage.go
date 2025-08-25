@@ -126,7 +126,8 @@ func (s3s *S3Store) getLastMinimizedTime() (time.Time, error) {
 	})
 	if err != nil {
 		var nsk *types.NoSuchKey
-		if errors.As(err, &nsk) {
+		var nf *types.NotFound
+		if errors.As(err, &nsk) || errors.As(err, &nf) {
 			// Object doesn't exist, so default to current time
 			return time.Now(), nil
 		}

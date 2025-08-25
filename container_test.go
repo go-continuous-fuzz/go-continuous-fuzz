@@ -31,7 +31,7 @@ func TestContainerRace(t *testing.T) {
 	assert.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, cli.Close()) })
 
-	// Pull the golang:1.23.9 image once for both containers.
+	// Pull the golang image once for both containers.
 	reader, err := cli.ImagePull(ctx, ContainerImage,
 		image.PullOptions{})
 	assert.NoError(t, err)

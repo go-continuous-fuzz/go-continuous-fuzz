@@ -204,6 +204,11 @@ readonly REQUIRED_PATTERNS=(
   'All workers completed early; cleaning up cycle' # due to grace period
   'Successfully downloaded and unzipped corpus'
   'Successfully zipped and uploaded corpus'
+  'msg="Building fuzz binary" package=stringutils target=FuzzUnSafeReverseString'
+  'msg="Building fuzz binary" package=stringutils target=FuzzReverseString'
+  'msg="Building fuzz binary" package=parser target=FuzzParseComplex'
+  'msg="Building fuzz binary" package=parser target=FuzzEvalExpr'
+  'msg="Building fuzz binary" package=tree target=FuzzBuildTree'
   'msg="Fuzzing in Docker completed successfully" package=stringutils target=FuzzUnSafeReverseString'
   'msg="Fuzzing in Docker completed successfully" package=stringutils target=FuzzReverseString'
   'msg="Fuzzing in Docker completed successfully" package=parser target=FuzzParseComplex'

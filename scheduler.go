@@ -33,9 +33,9 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 	cfg *Config) error {
 
 	for {
-		// Cleanup the project, corpus and reports directory (if any)
+		// Cleanup the project, corpus, reports, and binaries directory
 		// created during previous runs.
-		cleanupProjectCorpusAndReport(logger, cfg)
+		cleanupTmpDirs(logger, cfg)
 
 		// 1. Clone the repository based on the provided configuration.
 		logger.Info("Cloning project repository", "url",
@@ -160,7 +160,8 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
 	logger.Info("Starting fuzzing scheduler", "startTime", time.Now().
 		Format(time.RFC1123))
 
-	// Discover fuzz targets, and build the task queue and master state.
+	// Discover fuzz targets, and create the binary, build the task queue
+	// and master state.
 	states := []TargetState{}
 	taskQueue := NewTaskQueue()
 	for _, pkgPath := range cfg.Fuzz.PkgsPath {
@@ -173,6 +174,16 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
 		}
 
 		for _, target := range targets {
+			// Create the fuzz binary for this target, to execute
+			// them inside a Docker container.
+			err := createFuzzBinary(ctx, logger, cfg, pkgPath,
+				target)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to create fuzz "+
+					"binary: %w", err)
+				return
+			}
+
 			// Enqueue all discovered fuzz targets.
 			taskQueue.Enqueue(Task{
 				PackagePath: pkgPath,
@@ -281,6 +292,51 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
 
 	logger.Info("All fuzz targets processed successfully in this cycle")
 	errChan <- nil
+}
+
+// createFuzzBinary builds a fuzz test binary for the specified package and
+// target. The binary is cross-compiled for Linux/amd64 to ensure compatibility
+// with the Docker container environment. The resulting binary is placed in the
+// configured binary directory.
+func createFuzzBinary(ctx context.Context, logger *slog.Logger, cfg *Config,
+	pkg, target string) error {
+
+	logger.Info("Building fuzz binary", "package", pkg, "target", target)
+
+	// Construct the absolute path to the package and binary directory
+	// within the temporary workspace directory.
+	pkgPath := filepath.Join(cfg.Project.SrcDir, pkg)
+	fuzzBinaryPath := filepath.Join(cfg.Project.BinaryDir, pkg, target,
+		fmt.Sprintf("%s.test", target))
+
+	// Prepare the command and environment to build the fuzz binary.
+	// Command arguments (explanations):
+	//
+	//   -fuzz=^%s$
+	// Run only the fuzz test function matching this regular expression.
+	//
+	//   -o %s
+	// Write the compiled test binary to the given output path
+	// (instead of running tests immediately).
+	//
+	//   -c
+	// Compile the test binary but do not run it. This is required so
+	// we can later run the binary directly in Docker container.
+	cmd := []string{"test", fmt.Sprintf("-fuzz=^%s$", target),
+		"-o", fuzzBinaryPath, "-c"}
+
+	// Run the go test command with GOOS and GOARCH set to build a
+	// linux/amd64 binary.
+	//
+	// GOOS is the target operating system (here "linux"), and GOARCH
+	// is the target architecture (here "amd64"). These values control
+	// the environment for the go toolchain when building and testing.
+	_, err := runGoCommand(ctx, pkgPath, cmd, "GOOS=linux", "GOARCH=amd64")
+	if err != nil {
+		return fmt.Errorf("go test failed for %q: %w ", pkg, err)
+	}
+
+	return nil
 }
 
 // listFuzzTargets discovers and returns a list of fuzz targets for the given

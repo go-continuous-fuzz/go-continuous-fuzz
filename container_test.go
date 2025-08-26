@@ -51,15 +51,10 @@ func TestContainerRace(t *testing.T) {
 			defer taskCancel()
 
 			c := &Container{
-				ctx:    taskCtx,
-				logger: logger,
-				cli:    cli,
-				cfg: &Config{
-					Project: Project{
-						SrcDir: tmpDir,
-					},
-				},
-				workDir:        tmpDir,
+				ctx:            taskCtx,
+				logger:         logger,
+				cli:            cli,
+				fuzzBinaryPath: tmpDir,
 				hostCorpusPath: tmpDir,
 				cmd:            []string{"sleep", "infinity"},
 			}

@@ -14,13 +14,12 @@ import (
 
 // Container encapsulates the configuration and state needed to manage a Docker
 // container for running fuzzing tasks, including context, logger, Docker client
-// configuration, working directories, and command.
+// configuration, directories path, and command.
 type Container struct {
 	ctx            context.Context
 	logger         *slog.Logger
 	cli            *client.Client
-	cfg            *Config
-	workDir        string
+	fuzzBinaryPath string
 	hostCorpusPath string
 	cmd            []string
 }
@@ -34,7 +33,7 @@ func (c *Container) Start() (string, error) {
 	containerConfig := &container.Config{
 		Image:        ContainerImage,
 		Cmd:          c.cmd,
-		WorkingDir:   c.workDir,
+		WorkingDir:   ContainerWorkDir,
 		User:         fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		AttachStdout: true,
 		AttachStderr: true,
@@ -46,8 +45,8 @@ func (c *Container) Start() (string, error) {
 	hostConfig := &container.HostConfig{
 		AutoRemove: true,
 		Binds: []string{
-			fmt.Sprintf("%s:%s", c.cfg.Project.SrcDir,
-				ContainerProjectPath),
+			fmt.Sprintf("%s:%s", c.fuzzBinaryPath,
+				ContainerWorkDir),
 			fmt.Sprintf("%s:%s", c.hostCorpusPath,
 				ContainerCorpusPath),
 		},
@@ -110,8 +109,8 @@ func (c *Container) WaitAndGetLogs(ID, pkg, target string,
 
 	// Define the path where failing corpus inputs might be saved by the
 	// fuzzing process.
-	maybeFailingCorpusPath := filepath.Join(c.cfg.Project.SrcDir, pkg,
-		"testdata", "fuzz")
+	maybeFailingCorpusPath := filepath.Join(c.fuzzBinaryPath, "testdata",
+		"fuzz")
 
 	// Process the standard output, which may include both stdout and stderr
 	// content.

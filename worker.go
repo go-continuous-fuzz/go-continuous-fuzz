@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -146,22 +145,23 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 	hostCorpusPath := filepath.Join(wg.cfg.Project.CorpusDir, pkg,
 		"testdata", "fuzz")
 
+	// Define the path to the fuzz target binary on the host machine that
+	// will be executed inside the container.
+	fuzzBinaryPath := filepath.Join(wg.cfg.Project.BinaryDir, pkg, target)
+
 	// Ensure that the corpus directory on the host machine exists to avoid
 	// permission errors when running the container as a non-root user.
 	if err := EnsureDirExists(hostCorpusPath); err != nil {
 		return err
 	}
 
-	// Path to the package directory inside the container.
-	containerPkgPath := filepath.Join(ContainerProjectPath, pkg)
-
 	// Prepare the arguments for the 'go test' command to run the specific
 	// fuzz target in container.
 	goTestCmd := []string{
-		"go", "test",
-		fmt.Sprintf("-fuzz=^%s$", target),
+		fmt.Sprintf("./%s.test", target),
+		fmt.Sprintf("-test.fuzz=^%s$", target),
 		fmt.Sprintf("-test.fuzzcachedir=%s", ContainerCorpusPath),
-		"-parallel=1",
+		"-test.parallel=1",
 	}
 
 	// Create a subcontext with timeout for this individual fuzz target.
@@ -173,8 +173,7 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 		ctx:            fuzzCtx,
 		logger:         wg.logger,
 		cli:            wg.cli,
-		cfg:            wg.cfg,
-		workDir:        containerPkgPath,
+		fuzzBinaryPath: fuzzBinaryPath,
 		hostCorpusPath: hostCorpusPath,
 		cmd:            goTestCmd,
 	}
@@ -220,18 +219,6 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 				return nil
 			}
 			return fmt.Errorf("handling fuzz crash: %w", err)
-		}
-
-		// If the fuzz target fails, 'go test' saves the failing input
-		// in the package's testdata/fuzz/<FuzzTestName> directory. To
-		// prevent these saved inputs from causing subsequent test runs
-		// to fail (especially when running other fuzz targets), we
-		// remove the testdata directory to clean up the failing inputs.
-		failingInputPath := filepath.Join(hostPkgPath, "testdata",
-			"fuzz", target)
-		if err := os.RemoveAll(failingInputPath); err != nil {
-			return fmt.Errorf("failing input cleanup failed: %w",
-				err)
 		}
 	}
 

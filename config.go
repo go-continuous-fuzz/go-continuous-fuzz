@@ -23,6 +23,10 @@ const (
 	// are located
 	TmpReportDir = "reports"
 
+	// TmpBinaryDir is the temporary directory where the fuzz target
+	// binaries are located.
+	TmpBinaryDir = "binaries"
+
 	// ConfigFilename is the filename for the go-continuous-fuzz
 	// configuration file.
 	ConfigFilename = "go-continuous-fuzz.conf"
@@ -31,9 +35,9 @@ const (
 	// container.
 	ContainerImage = "golang:1.24.6"
 
-	// ContainerProjectPath specifies the root directory for the project
-	// inside the container.
-	ContainerProjectPath = "/go-continuous-fuzz-project"
+	// ContainerWorkDir specifies the working directory for the fuzz
+	// execution inside the container.
+	ContainerWorkDir = "/go-continuous-fuzz-workdir"
 
 	// ContainerCorpusPath specifies the directory inside the container used
 	// for the fuzz corpus.
@@ -84,6 +88,10 @@ type Project struct {
 	// ReportDir contains the absolute path to the directory where the
 	// coverage reports are located.
 	ReportDir string
+
+	// BinaryDir contains the absolute path to the directory where the
+	// fuzz target binaries are located.
+	BinaryDir string
 }
 
 // Fuzz defines all fuzzing-related flags and defaults, including the Git
@@ -172,6 +180,7 @@ func loadConfig() (*Config, error) {
 	cfg.Project.CorpusDir = filepath.Join(tmpDirPath,
 		fmt.Sprintf("%s_corpus", repo))
 	cfg.Project.ReportDir = filepath.Join(tmpDirPath, TmpReportDir)
+	cfg.Project.BinaryDir = filepath.Join(tmpDirPath, TmpBinaryDir)
 
 	return &cfg, nil
 }

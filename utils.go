@@ -37,8 +37,17 @@ func cleanupProjectCorpusAndReport(logger *slog.Logger, cfg *Config) {
 }
 
 // cleanupWorkspace deletes the temp directory to reset the workspace state.
+// If the user specified --workspace-path, the directory is not removed, since
+// keeping it can be useful for debugging crashes in go-continuous-fuzz.
 // Any errors encountered during removal are logged, but do not stop execution.
 func cleanupWorkspace(logger *slog.Logger, cfg *Config) {
+	// If the user specified --workspace-path, do not delete the workspace
+	// directory. This allows the user to preserve files for debugging in
+	// case go-continuous-fuzz crashes.
+	if cfg.Project.WorkSpacePath != "" {
+		return
+	}
+
 	// Since the config has the path to the project directory and we want to
 	// remove its temporary parent directory, we go up one level to its
 	// parent directory.

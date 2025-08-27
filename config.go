@@ -61,11 +61,14 @@ var (
 	ConfigFile = filepath.Join(GoContinuousFuzzDir, ConfigFilename)
 )
 
-// Project holds the Git repository URLs for the target project under test,
-// as well as the paths to the project and corpus directories.
+// Project holds configuration details for the target project under test.
+// It includes the Git repository URL, workspace path, S3 bucket name, and the
+// local paths for the project, corpus, and coverage reports.
 //
 //nolint:lll
 type Project struct {
+	WorkSpacePath string `long:"workspace-path" description:"Absolute path to the directory where go-continuous-fuzz generated files are stored"`
+
 	SrcRepo string `long:"src-repo" description:"Git repo URL of the project to fuzz" required:"true"`
 
 	S3BucketName string `long:"s3-bucket-name" description:"Name of the S3 bucket where the seed corpus will be stored" required:"true"`
@@ -163,11 +166,23 @@ func loadConfig() (*Config, error) {
 	}
 	cfg.Project.CorpusKey = fmt.Sprintf("%s_corpus.zip", repo)
 
-	// Set the absolute path to the temporary project directory.
-	tmpDirPath, err := os.MkdirTemp("", "go-continuous-fuzz-")
-	if err != nil {
-		return nil, err
+	// Set the absolute path to the workspace directory.
+	//
+	// If the user specifies --workspace-path, use that path directly.
+	// Otherwise, create a temporary directory automatically.
+	//
+	// Having a fixed workspace path is especially useful for debugging,
+	// since the generated files will persist if go-continuous-fuzz crashes.
+	var tmpDirPath string
+	if cfg.Project.WorkSpacePath == "" {
+		tmpDirPath, err = os.MkdirTemp("", "go-continuous-fuzz-")
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		tmpDirPath = CleanAndExpandPath(cfg.Project.WorkSpacePath)
 	}
+
 	cfg.Project.SrcDir = filepath.Join(tmpDirPath, TmpProjectDir)
 	cfg.Project.CorpusDir = filepath.Join(tmpDirPath,
 		fmt.Sprintf("%s_corpus", repo))

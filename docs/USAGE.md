@@ -6,6 +6,7 @@ You can configure **go-continuous-fuzz** using either conifg file or command-lin
 
 | Configuration Variable          | Description                                                  | Required | Default |
 | ------------------------------- | ------------------------------------------------------------ | -------- | ------- |
+| `project.workspace-path`        | Absolute path to the directory for storing generated files   | No       | —       |
 | `project.src-repo`              | Git repo URL of the project to fuzz                          | Yes      | —       |
 | `project.s3-bucket-name`        | Name of the S3 bucket where the seed corpus will be stored   | Yes      | —       |
 | `fuzz.crash-repo`               | Git repository URL where issues are created for fuzz crashes | Yes      | —       |
@@ -118,6 +119,7 @@ The file structure of the coverage reports is as follows:
    Or pass flags directly:
 
    ```bash
+     --project.workspace-path=</path/to/file>
      --project.src-repo=<project_repo_url>
      --project.s3-bucket-name=<bucket_name>
      --fuzz.crash-repo=<repo_url>
@@ -148,4 +150,5 @@ The file structure of the coverage reports is as follows:
   - `$LOCALAPPDATA/Go-continuous-fuzz/go-continuous-fuzz.conf` on Windows,
   - `~/Library/Application Support/Go-continuous-fuzz/go-continuous-fuzz.conf` on Mac OS
   - `$home/go-continuous-fuzz/go-continuous-fuzz.conf` on Plan9.
+- `project.workspace-path` is completely optional and is mainly used for debugging in case a crash occurs during the last run. If this option is not set, a temporary directory will be used, which will be deleted even if errors occur.
 - For more advanced usage, including Docker integration and running tests, see [INSTALL.md](./INSTALL.md).

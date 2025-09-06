@@ -194,7 +194,7 @@ func MinimizeCorpus(ctx context.Context, logger *slog.Logger, pkgDir, corpusDir,
 		dstPath := filepath.Join(cacheCorpusDir, file.Name)
 
 		// Copy file to temporary corpus directory.
-		if err := copyFile(srcPath, dstPath, logger); err != nil {
+		if err := copyData(srcPath, dstPath); err != nil {
 			return fmt.Errorf("copy %q to cache: %w", srcPath, err)
 		}
 

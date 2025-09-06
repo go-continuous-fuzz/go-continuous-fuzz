@@ -80,6 +80,10 @@ The file structure of the coverage reports is as follows:
   - A `.json` history file tracking daily coverage changes for each package/target.
   - Subdirectories structured as `pkg/fuzzTarget/` containing daily HTML coverage reports (e.g., `2025-07-12.html`) generated via `go tool cover`.
 
+## Notes
+
+* We assume that all files needed by tests are placed under `testdata/` in the respective package path. If a test depends on files outside of `testdata/`, those files will be ignored. This may cause GCF to report false positive errors, which GCF considers reasonable, since by convention all files needed by tests are supposed to go in `testdata/`.
+
 ## How It Works
 
 1. **Configuration:**  

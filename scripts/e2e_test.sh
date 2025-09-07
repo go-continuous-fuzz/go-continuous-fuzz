@@ -86,6 +86,11 @@ measure_fuzz_coverage() {
   # Count existing corpus inputs
   local num_inputs=$(count_corpus_inputs "${pkg}" "${func}")
 
+  # Add 2 inputs for FuzzEvalExpr since it has 2 seed inputs via f.Add()
+  if [[ "${func}" == "FuzzEvalExpr" ]]; then
+    ((num_inputs+=2))
+  fi
+
   # Run coverage measurement
   coverage_result=$(go test -run="^${func}$" -fuzz="^${func}$" \
     -fuzztime="${num_inputs}x" \
@@ -224,6 +229,11 @@ readonly REQUIRED_PATTERNS=(
   'msg="corpus minimization complete" target=FuzzParseComplex package=parser'
   'msg="corpus minimization complete" target=FuzzEvalExpr package=parser'
   'msg="corpus minimization complete" target=FuzzBuildTree package=tree'
+  'msg="calculated inputs added via f.Add()" target=FuzzUnSafeReverseString package=stringutils count=0'
+  'msg="calculated inputs added via f.Add()" target=FuzzReverseString package=stringutils count=0'
+  'msg="calculated inputs added via f.Add()" target=FuzzParseComplex package=parser count=0'
+  'msg="calculated inputs added via f.Add()" target=FuzzEvalExpr package=parser count=2'
+  'msg="calculated inputs added via f.Add()" target=FuzzBuildTree package=tree count=0'
   'Shutdown initiated during fuzzing cycle; performing final cleanup.'
   'msg="Worker starting fuzz target" workerID=1'
   'msg="Worker starting fuzz target" workerID=2'

@@ -11,15 +11,48 @@ import (
 	"strconv"
 )
 
+// runFuzzTest builds and executes a fuzzing command for the given target.
+// Additional environment variables can be supplied through extraEnv.
+func runFuzzTest(ctx context.Context, pkgDir, corpusDir, target string,
+	fuzzIterations int, extraEnv ...string) (string, error) {
+
+	// Build and run the fuzz command.
+	// Command arguments (explanations):
+	//
+	//   -run=^%s$ -fuzz=^%s$
+	// When the -fuzz flag is provided, `go test` normally runs all unit
+	// tests before doing any fuzzing. Passing -run together with -fuzz
+	// skips the initial unit-test run so we only exercise the fuzz target.
+	//
+	//   -fuzztime=%dx
+	// Sets fuzztime to exactly the number of inputs to process.
+	// This ensures the Go fuzzing engine stops after running those inputs
+	// and does not perform any additional fuzzing mutations.
+	//
+	//   -test.fuzzcachedir=%s
+	// Use a dedicated fuzz cache directory to avoid cross-contamination
+	// with the default cache.
+	fuzzCmd := []string{
+		"test",
+		fmt.Sprintf("-run=^%s$", target),
+		fmt.Sprintf("-fuzz=^%s$", target),
+		fmt.Sprintf("-fuzztime=%dx", fuzzIterations),
+		fmt.Sprintf("-test.fuzzcachedir=%s", corpusDir),
+	}
+
+	// Run the go test command with given environment variables.
+	return runGoCommand(ctx, pkgDir, fuzzCmd, extraEnv...)
+}
+
 // MeasureCoverage runs a Go fuzz target using the inputs from its corpus
-// directory and returns the best observed coverage (in coverage bits).
+// directory and f.Add and returns the best observed coverage (in coverage bits)
 //
 // It does this by:
 //  1. Reading the corpus files for the given target.
-//  2. Running `go test` with one fuzz iteration per file.
+//  2. Running `go test` with one fuzz iteration per input.
 //  3. Extracting the coverage bits from the command output.
-func MeasureCoverage(ctx context.Context, pkgDir, corpusDir,
-	target string) (int, error) {
+func MeasureCoverage(ctx context.Context, pkgDir, corpusDir, target string,
+	fuzzAddInputs int) (int, error) {
 
 	// Gather existing corpus files to size the fuzz run
 	corpusTargetDir := filepath.Join(corpusDir, target)
@@ -31,28 +64,12 @@ func MeasureCoverage(ctx context.Context, pkgDir, corpusDir,
 		return 0, fmt.Errorf("reading corpus dir: %w", err)
 	}
 
-	// Build and run the fuzz command.
-	// Command arguments (explanations):
-	//
-	//   -run=^%s$ -fuzz=^%s$
-	// When the -fuzz flag is provided, `go test` normally runs all unit
-	// tests before doing any fuzzing. Passing -run together with -fuzz
-	// skips the initial unit-test run so we only exercise the fuzz target.
-	//
-	//   -fuzztime=%dx
-	// Set fuzztime to exactly the number of inputs in the corpus directory
-	// so the Go fuzzing engine stops after measuring baseline coverage and
-	// does not perform any actual fuzzing iterations.
-	//
-	//   -test.fuzzcachedir=%s
-	// Use a dedicated fuzz cache directory to avoid cross-contamination
-	// with the default cache.
-	fuzzCmd := []string{"test",
-		fmt.Sprintf("-run=^%s$", target),
-		fmt.Sprintf("-fuzz=^%s$", target),
-		fmt.Sprintf("-fuzztime=%dx", len(files)),
-		fmt.Sprintf("-test.fuzzcachedir=%s", corpusDir),
-	}
+	// Total number of inputs already generated:
+	//   Inputs from f.Add() + existing corpus files.
+	// This is required because the "initial coverage bits:" line is only
+	// printed after all baseline coverage inputs have been executed using
+	// `go test ... -fuzztime=%dx`.
+	fuzzIterations := fuzzAddInputs + len(files)
 
 	// Run the go test command with GODEBUG to enable fuzzdebug output.
 	//
@@ -60,7 +77,8 @@ func MeasureCoverage(ctx context.Context, pkgDir, corpusDir,
 	// diagnostic information. We look for the line printed after all inputs
 	// in the fuzz cache have been processed, for example:
 	//   DEBUG finished processing ... initial coverage bits: XXX
-	output, err := runGoCommand(ctx, pkgDir, fuzzCmd, "GODEBUG=fuzzdebug=1")
+	output, err := runFuzzTest(ctx, pkgDir, corpusDir, target,
+		fuzzIterations, "GODEBUG=fuzzdebug=1")
 	if err != nil {
 		return 0, fmt.Errorf("go test failed for %q: %w ", pkgDir, err)
 	}
@@ -155,6 +173,17 @@ func MinimizeCorpus(ctx context.Context, logger *slog.Logger, pkgDir, corpusDir,
 		return files[i].Size < files[j].Size
 	})
 
+	// Calculate how many inputs were provided via f.Add() calls. This is
+	// necessary because the "initial coverage bits:" line is only printed
+	// after all baseline coverage inputs have been executed. Therefore, we
+	// need to include the f.Add inputs along with the corpus files' inputs
+	// when calculating the coverage bits.
+	fuzzAddInputs, err := calculateFuzzAddInputs(ctx, logger, pkgDir,
+		corpusDir, target)
+	if err != nil {
+		return fmt.Errorf("failed to calculate f.Add inputs: %w", err)
+	}
+
 	bestCoverage := 0
 	removedCount := 0
 
@@ -172,7 +201,7 @@ func MinimizeCorpus(ctx context.Context, logger *slog.Logger, pkgDir, corpusDir,
 		// Measure coverage with the current set in the temporary corpus
 		// directory.
 		newCoverage, err := MeasureCoverage(ctx, pkgDir, cacheDir,
-			target)
+			target, fuzzAddInputs)
 		if err != nil {
 			return fmt.Errorf("measuring base coverage: %w", err)
 		}
@@ -203,4 +232,56 @@ func MinimizeCorpus(ctx context.Context, logger *slog.Logger, pkgDir, corpusDir,
 	logger.Info("corpus minimization complete", "removedCount",
 		removedCount, "finalCoverage", bestCoverage)
 	return nil
+}
+
+// calculateFuzzAddInputs runs `go test` with fuzzing enabled to determine
+// how many inputs were added via f.Add() calls in the fuzz target.
+//
+// It does this by:
+//  1. Running the fuzz target once to collect the total baseline inputs.
+//  2. Counting the number of existing corpus files for that target.
+//  3. Subtracting the existing corpus files from the total baseline inputs.
+func calculateFuzzAddInputs(ctx context.Context, logger *slog.Logger, pkgDir,
+	corpusDir, target string) (int, error) {
+
+	// Run the fuzz target once to collect baseline inputs.
+	output, err := runFuzzTest(ctx, pkgDir, corpusDir, target, 1)
+	if err != nil {
+		return 0, fmt.Errorf("go test failed for %q: %w ", pkgDir, err)
+	}
+
+	// Parse the fuzz output to extract the total baseline inputs.
+	//
+	// Returns the number of baseline coverage inputs reported by the Go
+	// fuzzing engine while processing inputs from the fuzz cache.
+	coverageRe := regexp.MustCompile(
+		`gathering baseline coverage:\s+\d+/(\d+)`)
+	matches := coverageRe.FindStringSubmatch(output)
+	if len(matches) < 2 {
+		return 0, fmt.Errorf("baseline inputs not found in output:\n%s",
+			output)
+	}
+
+	totalBaselineInputs, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0, fmt.Errorf("parsing baseline inputs: %w", err)
+	}
+
+	// Count existing corpus files for this target.
+	corpusFileCount := 0
+	corpusTargetDir := filepath.Join(corpusDir, target)
+	files, err := os.ReadDir(corpusTargetDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return 0, fmt.Errorf("reading corpus dir: %w", err)
+		}
+	} else {
+		corpusFileCount = len(files)
+	}
+
+	// Inputs from f.Add() = total baseline inputs - existing corpus files
+	addedInputs := totalBaselineInputs - corpusFileCount
+	logger.Info("calculated inputs added via f.Add()", "count", addedInputs)
+
+	return addedInputs, nil
 }

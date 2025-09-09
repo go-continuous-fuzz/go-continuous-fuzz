@@ -357,7 +357,7 @@ for crash in "${required_crashes[@]}"; do
 done
 
 # Verify the expected number of open issues in the crash repo
-issue_count=$(curl -s "https://api.github.com/repos/go-continuous-fuzz/go-fuzzing-example/issues" | jq length)
+issue_count=$(curl -s "https://api.github.com/search/issues?q=repo:go-continuous-fuzz/go-fuzzing-example+is:issue+is:open" | jq ".total_count")
 if [[ "${issue_count}" -ne 3 ]]; then
   echo "❌ ERROR: Expected 3 open issues, but found ${issue_count}"
   exit 1

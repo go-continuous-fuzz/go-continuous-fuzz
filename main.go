@@ -45,6 +45,12 @@ func run() int {
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
 
+	// If output is piped to another program and then a SIGINT is sent to
+	// the process group, we will receive a SIGPIPE when the other program
+	// closes the pipe. In that case, we want the below SIGINT handler to
+	// clean things up rather than terminating immediately.
+	signal.Ignore(syscall.SIGPIPE)
+
 	// Set up signal handling for graceful shutdown on SIGINT and SIGTERM.
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

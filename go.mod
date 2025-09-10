@@ -14,6 +14,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/oauth2 v0.30.0
 	golang.org/x/sync v0.15.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (

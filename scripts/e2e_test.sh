@@ -8,7 +8,7 @@ set -eux
 readonly PROJECT_SRC_PATH="https://oauth2:${GO_FUZZING_EXAMPLE_AUTH_TOKEN}@github.com/go-continuous-fuzz/go-fuzzing-example.git"
 readonly SYNC_FREQUENCY="3m"
 readonly CORPUS_MINIMIZE_INTERVAL="4m"
-readonly MAKE_TIMEOUT="9m"
+readonly ITERATIONS=3
 
 # Use test workspace directory
 readonly TEST_WORKDIR=$(mktemp -dt "test-go-continuous-fuzz-XXXXXX")
@@ -26,6 +26,7 @@ ARGS="\
 --project.s3-bucket-name=${BUCKET_NAME} \
 --fuzz.sync-frequency=${SYNC_FREQUENCY} \
 --fuzz.corpus-minimize-interval=${CORPUS_MINIMIZE_INTERVAL} \
+--fuzz.iterations=${ITERATIONS} \
 --fuzz.crash-repo=${PROJECT_SRC_PATH} \
 --fuzz.num-workers=3 \
 --fuzz.pkgs-path=parser \
@@ -188,18 +189,16 @@ for target in "${NON_CRASHING_FUZZ_TARGETS[@]}"; do
 done
 
 # Execute fuzzing process
-echo "Starting fuzzing process (timeout: ${MAKE_TIMEOUT})..."
+echo "Starting fuzzing process..."
 mkdir -p "${FUZZ_RESULTS_PATH}"
 MAKE_LOG="${FUZZ_RESULTS_PATH}/make_run.log"
 
-# Run make run under timeout, capturing stdout+stderr into MAKE_LOG.
-timeout -s INT --preserve-status "${MAKE_TIMEOUT}" make run ARGS="${ARGS}" 2>&1 | tee "${MAKE_LOG}"
+# Run make run, capturing stdout+stderr into MAKE_LOG.
+make run ARGS="${ARGS}" 2>&1 | tee "${MAKE_LOG}"
 status=${PIPESTATUS[0]}
 
-# Handle exit codes:
-#   130 → timeout sent SIGINT; treat as expected termination
-#   any other non-zero → unexpected error
-if [[ ${status} -ne 130 ]]; then
+# Handle exit codes.
+if [[ ${status} -ne 0 ]]; then
   echo "❌ Fuzzing exited with unexpected error (status: ${status})."
   exit "${status}"
 fi
@@ -234,11 +233,11 @@ readonly REQUIRED_PATTERNS=(
   'msg="calculated inputs added via f.Add()" target=FuzzParseComplex package=parser count=0'
   'msg="calculated inputs added via f.Add()" target=FuzzEvalExpr package=parser count=2'
   'msg="calculated inputs added via f.Add()" target=FuzzBuildTree package=tree count=0'
-  'Shutdown initiated during fuzzing cycle; performing final cleanup.'
   'msg="Worker starting fuzz target" workerID=1'
   'msg="Worker starting fuzz target" workerID=2'
   'msg="Worker starting fuzz target" workerID=3'
   'msg="Per-target fuzz timeout calculated" duration=1m30s'
+  'msg="Completed all fuzzing cycles" count=3'
 )
 
 # Verify that worker logs contain expected entries
@@ -277,6 +276,7 @@ readonly FORBIDDEN_PATTERNS=(
   'Corpus object not found. Starting with empty corpus.'
   'warning: starting with empty corpus'
   'nondeterministic fuzz target: coverage decreased'
+  'Shutdown initiated during fuzzing cycle; performing final cleanup.'
 )
 
 # Verify that worker logs do not contain forbidden entries

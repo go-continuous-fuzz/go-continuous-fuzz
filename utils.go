@@ -45,7 +45,7 @@ func cleanupTmpDirs(logger *slog.Logger, cfg *Config) {
 // If the user specified --workspace-path, the directory is not removed, since
 // keeping it can be useful for debugging crashes in go-continuous-fuzz.
 // Any errors encountered during removal are logged, but do not stop execution.
-func cleanupWorkspace(logger *slog.Logger, cfg *Config) {
+func cleanupWorkspace(cfg *Config) {
 	// If the user specified --workspace-path, do not delete the workspace
 	// directory. This allows the user to preserve files for debugging in
 	// case go-continuous-fuzz crashes.
@@ -58,7 +58,7 @@ func cleanupWorkspace(logger *slog.Logger, cfg *Config) {
 	// parent directory.
 	parentDir := filepath.Dir(cfg.Project.SrcDir)
 	if err := os.RemoveAll(parentDir); err != nil {
-		logger.Error("workspace cleanup failed", "error", err)
+		fmt.Fprintf(os.Stderr, "workspace cleanup failed: %v", err)
 	}
 }
 

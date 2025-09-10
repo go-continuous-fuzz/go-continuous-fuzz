@@ -244,7 +244,7 @@ func updateReport(ctx context.Context, pkg, target string, cfg *Config,
 	corpusDst := filepath.Join(pkgPath, "testdata", "fuzz", target)
 
 	// Copy any existing corpus files into the testdata directory.
-	if err := copyCorpusFiles(corpusSrc, corpusDst, logger); err != nil {
+	if err := copyData(corpusSrc, corpusDst); err != nil {
 		return fmt.Errorf("corpus copy failed: %w", err)
 	}
 
@@ -293,40 +293,6 @@ func updateReport(ctx context.Context, pkg, target string, cfg *Config,
 	// Record this run in the target's history and regenerate its HTML.
 	if err := covReport.updateTarget(); err != nil {
 		return fmt.Errorf("target history update failed: %w", err)
-	}
-
-	return nil
-}
-
-// copyCorpusFiles copies corpus files from source to destination directory.
-func copyCorpusFiles(srcDir, dstDir string, logger *slog.Logger) error {
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read corpus directory %q: %w", srcDir, err)
-	}
-
-	// Ensure destination directory exists
-	if err := EnsureDirExists(dstDir); err != nil {
-		return fmt.Errorf("ensure destination dir %q: %w", dstDir, err)
-	}
-
-	// Copy each file entry
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		srcPath := filepath.Join(srcDir, entry.Name())
-		dstPath := filepath.Join(dstDir, entry.Name())
-
-		// Copy the individual file
-		if err := copyFile(srcPath, dstPath, logger); err != nil {
-			return fmt.Errorf("copy %q to %q: %w", srcPath, dstPath,
-				err)
-		}
 	}
 
 	return nil

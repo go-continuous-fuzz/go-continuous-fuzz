@@ -173,6 +173,11 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
 			return
 		}
 
+		// Path to the testdata directory inside the package, which
+		// must be copied after creating the target's binary.
+		srcTestDataPath := filepath.Join(cfg.Project.SrcDir, pkgPath,
+			"testdata")
+
 		for _, target := range targets {
 			// Create the fuzz binary for this target, to execute
 			// them inside a Docker container.
@@ -181,6 +186,29 @@ func scheduleFuzzing(ctx context.Context, logger *slog.Logger, cfg *Config,
 			if err != nil {
 				errChan <- fmt.Errorf("failed to create fuzz "+
 					"binary: %w", err)
+				return
+			}
+
+			// Copy the testdata directory for the given package
+			// into the fuzz binary path, so that tests depending on
+			// files from the testdata directory can fetch them
+			// properly.
+			//
+			// NOTE: We assume that all files needed by tests are
+			// placed under testdata/. If a test depends on files
+			// outside of testdata, those files will be ignored,
+			// which may cause GCF to report false positive errors,
+			// which GCF considers perfectly reasonable.
+			//
+			// NOTE: We need to copy the testdata into each target's
+			// directory because we can never be sure which tests
+			// will use which part of the testdata directory.
+			destTestDataPath := filepath.Join(cfg.Project.BinaryDir,
+				pkgPath, target, "testdata")
+			err = copyData(srcTestDataPath, destTestDataPath)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to copy "+
+					"testdata directory: %w", err)
 				return
 			}
 

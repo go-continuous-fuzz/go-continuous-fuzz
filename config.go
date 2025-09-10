@@ -112,6 +112,8 @@ type Fuzz struct {
 	NumWorkers int `long:"num-workers" description:"Number of concurrent fuzzing workers" default:"1"`
 
 	CorpusMinimizeInterval time.Duration `long:"corpus-minimize-interval" description:"Interval between consecutive corpus minimizations" default:"7d"`
+
+	Iterations int `long:"iterations" description:"Number of fuzzing cycles to run (0 means to run forever)" default:"0"`
 }
 
 // Config encapsulates all top-level configuration parameters required to run
@@ -164,6 +166,12 @@ func loadConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid number of workers: %d, "+
 			"allowed range is [1, %d]", cfg.Fuzz.NumWorkers,
 			runtime.NumCPU())
+	}
+
+	// Ensure iterations are non-negative.
+	if cfg.Fuzz.Iterations < 0 {
+		return nil, fmt.Errorf("invalid number of iterations: %d, "+
+			"must be non-negative", cfg.Fuzz.Iterations)
 	}
 
 	// Extract the repository name from the source URL and use it to set the

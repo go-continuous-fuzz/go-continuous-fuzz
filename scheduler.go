@@ -32,7 +32,19 @@ import (
 func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 	cfg *Config) error {
 
+	// A non-positive number of iterations indicates we should run forever.
+	// Otherwise, run for the specified number of iterations.
+	runForever := cfg.Fuzz.Iterations <= 0
+	iterationsLeft := cfg.Fuzz.Iterations
+
 	for {
+		if !runForever {
+			if iterationsLeft <= 0 {
+				break
+			}
+			iterationsLeft--
+		}
+
 		// Cleanup the project, corpus, reports, and binaries directory
 		// created during previous runs.
 		cleanupTmpDirs(logger, cfg)
@@ -145,6 +157,10 @@ func runFuzzingCycles(ctx context.Context, logger *slog.Logger,
 			return err
 		}
 	}
+
+	logger.Info("Completed all fuzzing cycles", "count",
+		cfg.Fuzz.Iterations)
+	return nil
 }
 
 // scheduleFuzzing enqueues all discovered fuzz targets into a task queue and

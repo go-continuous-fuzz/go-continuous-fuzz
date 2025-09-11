@@ -14,6 +14,7 @@ You can configure **go-continuous-fuzz** using either conifg file or command-lin
 | `fuzz.sync-frequency`           | Duration between consecutive fuzzing cycles                  | No       | 24h     |
 | `fuzz.num-workers`              | Number of concurrent fuzzing workers                         | No       | 1       |
 | `fuzz.corpus-minimize-interval` | Interval between consecutive corpus minimizations            | No       | 7d      |
+| `fuzz.iterations`               | Number of fuzzing cycles to run (0 means to run forever)     | No       | 0       |
 
 **Repository URL formats:**
 For `project.src-repo`:
@@ -131,6 +132,7 @@ The file structure of the coverage reports is as follows:
      --fuzz.sync-frequency=<time>
      --fuzz.num-workers=<number_of_workers>
      --fuzz.corpus-minimize-interval=<time>
+     --fuzz.iterations=<number_of_iterations>
    ```
 
 3. **Run the Fuzzing Engine:**  

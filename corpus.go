@@ -32,12 +32,17 @@ func runFuzzTest(ctx context.Context, pkgDir, corpusDir, target string,
 	//   -test.fuzzcachedir=%s
 	// Use a dedicated fuzz cache directory to avoid cross-contamination
 	// with the default cache.
+	//
+	//   -test.parallel=1
+	// Restrict test-level parallelism to a single worker to prevent excess
+	// CPU use and avoid resource races during fuzzing.
 	fuzzCmd := []string{
 		"test",
 		fmt.Sprintf("-run=^%s$", target),
 		fmt.Sprintf("-fuzz=^%s$", target),
 		fmt.Sprintf("-fuzztime=%dx", fuzzIterations),
 		fmt.Sprintf("-test.fuzzcachedir=%s", corpusDir),
+		"-test.parallel=1",
 	}
 
 	// Run the go test command with given environment variables.

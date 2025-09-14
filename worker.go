@@ -94,11 +94,10 @@ func (wg *WorkerGroup) WorkersStartAndWait(numWorkers int) error {
 	return nil
 }
 
-// runWorker continuously pulls tasks from taskQueue and executes them via
-// fuzz.executeFuzzTarget. Each Task is run with its own timeout (taskTimeout).
-//
-// If the worker context is canceled or any Task execution returns an error,
-// runWorker stops and returns that error.
+// runWorker pulls tasks from the taskQueue until it is empty or the worker
+// context is canceled:
+//   - Verifies and close any resolved GitHub issues related to the fuzz target.
+//   - Executes the fuzz target with a timeout.
 func (wg *WorkerGroup) runWorker(workerID int) error {
 	for {
 		task, ok := wg.taskQueue.Dequeue()
@@ -109,13 +108,43 @@ func (wg *WorkerGroup) runWorker(workerID int) error {
 		}
 
 		wg.logger.Info(
-			"Worker starting fuzz target", "workerID", workerID,
+			"Worker starting issue verification", "workerID",
+			workerID, "package", task.PackagePath, "target",
+			task.Target,
+		)
+
+		// Initialize a GitHub client for issue verification.
+		gh, err := NewGitHubRepo(wg.ctx, wg.logger.With("target",
+			task.Target).With("package", task.PackagePath), wg.cli,
+			wg.cfg)
+		if err != nil {
+			return fmt.Errorf("error initializing GitHub client: "+
+				"%w", err)
+		}
+
+		// The worker will verify and close any open GitHub issues
+		// related to the fuzz target.
+		err = gh.verifyAndCloseResolvedIssues(task.PackagePath,
+			task.Target)
+		if err != nil {
+			if wg.ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("failed to verify and close open "+
+				"issues: %w", err)
+		}
+
+		wg.logger.Info(
+			"Worker starting fuzzing", "workerID", workerID,
 			"package", task.PackagePath, "target", task.Target,
 			"timeout", wg.taskTimeout,
 		)
 
-		err := wg.executeFuzzTarget(task.PackagePath, task.Target)
+		err = wg.executeFuzzTarget(task.PackagePath, task.Target, gh)
 		if err != nil {
+			if wg.ctx.Err() != nil {
+				return nil
+			}
 			return fmt.Errorf("worker %d: fuzz target %q/%q "+
 				"failed: %w", workerID, task.PackagePath,
 				task.Target, err)
@@ -128,11 +157,15 @@ func (wg *WorkerGroup) runWorker(workerID int) error {
 	}
 }
 
-// executeFuzzTarget runs the specified fuzz target for a package for a given
-// duration using Docker. It sets up the necessary environment, starts the
-// container, streams its output, creates a GitHub issue reporting the crash
-// (if any), and updates the coverage report.
-func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
+// executeFuzzTarget runs the specified fuzz target for a package using Docker.
+// It performs the following steps:
+//   - Starts the fuzzing container and streams its output.
+//   - Reports any fuzz crashes by creating a GitHub issue.
+//   - Updates the coverage report.
+//   - Optionally minimizes the corpus if configured.
+func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string,
+	gh *GitHubRepo) error {
+
 	wg.logger.Info("Executing fuzz target in Docker", "package", pkg,
 		"target", target, "duration", wg.taskTimeout)
 
@@ -207,17 +240,8 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 		}
 
 	case fuzzCrash := <-fuzzCrashChan:
-		// Create a GitHub client and report the fuzz crash.
-		gh, err := NewGitHubRepo(wg.ctx, wg.logger.With("target",
-			target).With("package", pkg), wg.cfg.Fuzz.CrashRepo)
-		if err != nil {
-			return fmt.Errorf("initializing GitHub client: %w", err)
-		}
-
+		// Report the fuzz crash.
 		if err := gh.handleCrash(pkg, target, fuzzCrash); err != nil {
-			if wg.ctx.Err() != nil {
-				return nil
-			}
 			return fmt.Errorf("handling fuzz crash: %w", err)
 		}
 	}
@@ -227,9 +251,6 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 
 	err = updateReport(wg.ctx, pkg, target, wg.cfg, wg.logger)
 	if err != nil {
-		if wg.ctx.Err() != nil {
-			return nil
-		}
 		return fmt.Errorf("failed to add coverage report for package "+
 			"%s, target %s: %w", pkg, target, err)
 	}
@@ -243,9 +264,6 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string) error {
 			With("package", pkg), hostPkgPath, hostCorpusPath,
 			target)
 		if err != nil {
-			if wg.ctx.Err() != nil {
-				return nil
-			}
 			return fmt.Errorf("minimizing corpus for target %q: %w",
 				target, err)
 		}

@@ -157,10 +157,8 @@ func TestFormatCrashReport(t *testing.T) {
 				"--- FAIL: FuzzBuildTree\n" +
 				"~~~\n" +
 				"## Failing testcase\n" +
-				"~~~sh\n" +
-				"Failure occurred while testing the seed " +
-				"corpus; please check the entries added via " +
-				"f.Add.\n" + "~~~\n" + waterMark + "\n",
+				"~~~sh\n" + seedCorpusErrMsg +
+				"\n~~~\n" + waterMark + "\n",
 		},
 	}
 

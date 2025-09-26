@@ -234,9 +234,15 @@ readonly REQUIRED_PATTERNS=(
   'msg="calculated inputs added via f.Add()" target=FuzzParseComplex package=parser count=0'
   'msg="calculated inputs added via f.Add()" target=FuzzEvalExpr package=parser count=2'
   'msg="calculated inputs added via f.Add()" target=FuzzBuildTree package=tree count=0'
-  'msg="Worker starting fuzz target" workerID=1'
-  'msg="Worker starting fuzz target" workerID=2'
-  'msg="Worker starting fuzz target" workerID=3'
+  'msg="Crash still reproducible; keeping GitHub issue open" target=FuzzParseComplex package=parser'
+  'msg="Crash still reproducible; keeping GitHub issue open" target=FuzzUnSafeReverseString package=stringutils'
+  'msg="Crash still reproducible; keeping GitHub issue open" target=FuzzBuildTree package=tree'
+  'msg="Worker starting fuzzing" workerID=1'
+  'msg="Worker starting fuzzing" workerID=2'
+  'msg="Worker starting fuzzing" workerID=3'
+  'msg="Worker starting issue verification" workerID=1'
+  'msg="Worker starting issue verification" workerID=2'
+  'msg="Worker starting issue verification" workerID=3'
   'msg="Per-target fuzz timeout calculated" duration=1m30s'
   'msg="Completed all fuzzing cycles" count=3'
 )
@@ -272,11 +278,15 @@ done
 # List of patterns that should NOT be present in the log
 readonly FORBIDDEN_PATTERNS=(
   'level=ERROR'
-  'msg="Worker starting fuzz target" workerID=4'
+  'msg="Worker starting fuzzing" workerID=4'
+  'msg="Worker starting issue verification" workerID=4'
   'Cycle duration complete; initiating cleanup.'
   'Corpus object not found. Starting with empty corpus.'
   'warning: starting with empty corpus'
   'Shutdown initiated during fuzzing cycle; performing final cleanup.'
+  'Crash no longer reproducible; closing associated GitHub issue'
+  'No failing testcase found in body; skipping issue, possibly an unrelated issue with a similar title'
+  'Seed corpus crash detected; manual verification required'
 )
 
 # Verify that worker logs do not contain forbidden entries

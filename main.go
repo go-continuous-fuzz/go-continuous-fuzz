@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"log/slog"
 
 	flags "github.com/jessevdk/go-flags"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // main is the entry point of the application.
@@ -23,9 +27,6 @@ func main() {
 // run sets up signal handling for graceful shutdown, loads configuration, and
 // starts the continuous fuzzing cycles.
 func run() int {
-	// Initialize a structured logger that outputs logs in text format.
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-
 	// Load configuration settings from config file or command line flags.
 	cfg, err := loadConfig()
 	if err != nil {
@@ -36,9 +37,22 @@ func run() int {
 		}
 
 		// Print error if not due to help request.
-		logger.Error("Failed to load configuration", "error", err)
+		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v", err)
 		return 1
 	}
+
+	// Initialize a structured logger that writes to both stdout and the
+	// rotating log file.
+	logFile := &lumberjack.Logger{
+		Filename:   filepath.Join(cfg.LogDir, LogFilename),
+		MaxSize:    100,
+		MaxBackups: 7,
+		MaxAge:     28,
+		Compress:   true,
+	}
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	logger := slog.New(slog.NewTextHandler(multiWriter, nil))
+
 	defer cleanupWorkspace(logger, cfg)
 
 	// Create a cancellable context to manage the application's lifecycle.

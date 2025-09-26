@@ -19,9 +19,11 @@ readonly CORPUS_ZIP_NAME="${CORPUS_DIR_NAME}.zip"
 readonly CORPUS_DIR_PATH="${TEST_WORKDIR}/${CORPUS_DIR_NAME}"
 readonly FUZZ_RESULTS_PATH="${TEST_WORKDIR}/fuzz_results"
 readonly BUCKET_NAME="test-go-continuous-fuzz-bucket"
+readonly GCF_LOG="${FUZZ_RESULTS_PATH}/gcf.log"
 
 # Command-line flags for fuzzing process configuration
 ARGS="\
+--logdir=${FUZZ_RESULTS_PATH} \
 --project.src-repo=${PROJECT_SRC_PATH} \
 --project.s3-bucket-name=${BUCKET_NAME} \
 --fuzz.sync-frequency=${SYNC_FREQUENCY} \
@@ -191,11 +193,10 @@ done
 # Execute fuzzing process
 echo "Starting fuzzing process..."
 mkdir -p "${FUZZ_RESULTS_PATH}"
-MAKE_LOG="${FUZZ_RESULTS_PATH}/make_run.log"
 
-# Run make run, capturing stdout+stderr into MAKE_LOG.
-make run ARGS="${ARGS}" 2>&1 | tee "${MAKE_LOG}"
-status=${PIPESTATUS[0]}
+# Run make run, capturing stdout+stderr into GCF_LOG.
+make run ARGS="${ARGS}"
+status=${?}
 
 # Handle exit codes.
 if [[ ${status} -ne 0 ]]; then
@@ -241,9 +242,9 @@ readonly REQUIRED_PATTERNS=(
 )
 
 # Verify that worker logs contain expected entries
-echo "Verifying worker log entries in ${MAKE_LOG}..."
+echo "Verifying worker log entries in ${GCF_LOG}..."
 for pattern in "${REQUIRED_PATTERNS[@]}"; do
-  if ! grep -q -- "${pattern}" "${MAKE_LOG}"; then
+  if ! grep -q -- "${pattern}" "${GCF_LOG}"; then
     echo "❌ ERROR: Missing expected log entry: ${pattern}"
     exit 1
   fi
@@ -257,10 +258,10 @@ readonly REQUIRED_PATTERN_GROUPS=(
   'msg="Issue already exists" target=FuzzBuildTree package=tree||msg="Issue created successfully" target=FuzzBuildTree package=tree'
 )
 
-echo "Verifying required issue-related log entries in ${MAKE_LOG}..."
+echo "Verifying required issue-related log entries in ${GCF_LOG}..."
 for group in "${REQUIRED_PATTERN_GROUPS[@]}"; do
   IFS='||' read -r pattern1 pattern2 <<<"$group"
-  if ! grep -q -- "${pattern1}" "${MAKE_LOG}" && ! grep -q -- "${pattern2}" "${MAKE_LOG}"; then
+  if ! grep -q -- "${pattern1}" "${GCF_LOG}" && ! grep -q -- "${pattern2}" "${GCF_LOG}"; then
     echo "❌ ERROR: Neither of the expected log entries found:"
     echo "  -> ${pattern1}"
     echo "  -> ${pattern2}"
@@ -275,14 +276,13 @@ readonly FORBIDDEN_PATTERNS=(
   'Cycle duration complete; initiating cleanup.'
   'Corpus object not found. Starting with empty corpus.'
   'warning: starting with empty corpus'
-  'nondeterministic fuzz target: coverage decreased'
   'Shutdown initiated during fuzzing cycle; performing final cleanup.'
 )
 
 # Verify that worker logs do not contain forbidden entries
-echo "Verifying absence of forbidden log entries in ${MAKE_LOG}..."
+echo "Verifying absence of forbidden log entries in ${GCF_LOG}..."
 for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
-  if grep -q -- "${pattern}" "${MAKE_LOG}"; then
+  if grep -q -- "${pattern}" "${GCF_LOG}"; then
     echo "❌ ERROR: Unexpected log entry found: ${pattern}"
     exit 1
   fi

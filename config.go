@@ -47,6 +47,10 @@ const (
 	// container startup overhead and ensures that all targets have
 	// sufficient time to complete.
 	ContainerGracePeriod = 20 * time.Second
+
+	// LogFilename is the filename where go-continuous-fuzz writes its log
+	// output, in addition to writing it to stdout.
+	LogFilename = "gcf.log"
 )
 
 var (
@@ -63,6 +67,10 @@ var (
 	// ConfigFile is the full path of go-continuous-fuzz's configuration
 	// file.
 	ConfigFile = filepath.Join(GoContinuousFuzzDir, ConfigFilename)
+
+	// DefaultLogDir is the full path to the go-continuous-fuzz default log
+	// file directory.
+	DefaultLogDir = filepath.Join(GoContinuousFuzzDir, "logs")
 )
 
 // Project holds configuration details for the target project under test.
@@ -122,6 +130,8 @@ type Fuzz struct {
 //  2. CONF file (ConfigFile).
 //  3. Default
 type Config struct {
+	LogDir string `long:"logdir" description:"Directory to log output."`
+
 	Project Project `group:"Project" namespace:"project"`
 
 	Fuzz Fuzz `group:"Fuzz Options" namespace:"fuzz"`
@@ -133,7 +143,9 @@ type Config struct {
 // It performs validation on required fields and applies defaults where needed.
 // Returns a pointer to a Config struct or an error if validation fails.
 func loadConfig() (*Config, error) {
-	var cfg Config
+	cfg := Config{
+		LogDir: DefaultLogDir,
+	}
 
 	// Determine the config file path
 	configFilePath := CleanAndExpandPath(ConfigFile)
@@ -157,6 +169,16 @@ func loadConfig() (*Config, error) {
 	// file.
 	if _, err := parser.Parse(); err != nil {
 		return nil, err
+	}
+
+	// As soon as we're done parsing configuration options, ensure paths to
+	// directories and files are cleaned and expanded before attempting
+	// to use them later on.
+	cfg.LogDir = CleanAndExpandPath(cfg.LogDir)
+
+	// Create the logs directory if they don't already exist.
+	if err := EnsureDirExists(cfg.LogDir); err != nil {
+		return nil, fmt.Errorf("create logs directory: %w", err)
 	}
 
 	// Validate the number of workers to ensure it is within the allowed

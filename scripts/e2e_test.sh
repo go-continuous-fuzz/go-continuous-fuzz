@@ -41,6 +41,13 @@ readonly NON_CRASHING_FUZZ_TARGETS=(
   "stringutils:FuzzReverseString"
 )
 
+# Crashing fuzz target definitions (package:function)
+readonly CRASHING_FUZZ_TARGETS=(
+  "parser:FuzzParseComplex"
+  "stringutils:FuzzUnSafeReverseString"
+  "tree:FuzzBuildTree"
+)
+
 # All fuzz target definitions (package:function)
 readonly ALL_FUZZ_TARGETS=(
   "parser:FuzzEvalExpr"
@@ -234,9 +241,12 @@ readonly REQUIRED_PATTERNS=(
   'msg="calculated inputs added via f.Add()" target=FuzzParseComplex package=parser count=0'
   'msg="calculated inputs added via f.Add()" target=FuzzEvalExpr package=parser count=2'
   'msg="calculated inputs added via f.Add()" target=FuzzBuildTree package=tree count=0'
-  'msg="Worker starting fuzz target" workerID=1'
-  'msg="Worker starting fuzz target" workerID=2'
-  'msg="Worker starting fuzz target" workerID=3'
+  'msg="Worker starting fuzzing" workerID=1'
+  'msg="Worker starting fuzzing" workerID=2'
+  'msg="Worker starting fuzzing" workerID=3'
+  'msg="Worker starting issue verification" workerID=1'
+  'msg="Worker starting issue verification" workerID=2'
+  'msg="Worker starting issue verification" workerID=3'
   'msg="Per-target fuzz timeout calculated" duration=1m30s'
   'msg="Completed all fuzzing cycles" count=3'
 )
@@ -250,21 +260,33 @@ for pattern in "${REQUIRED_PATTERNS[@]}"; do
   fi
 done
 
-# List of required log patterns where at least one in each group must be present
-# Format: pattern1 || pattern2
-readonly REQUIRED_PATTERN_GROUPS=(
-  'msg="Issue already exists" target=FuzzParseComplex package=parser||msg="Issue created successfully" target=FuzzParseComplex package=parser'
-  'msg="Issue already exists" target=FuzzUnSafeReverseString package=stringutils||msg="Issue created successfully" target=FuzzUnSafeReverseString package=stringutils'
-  'msg="Issue already exists" target=FuzzBuildTree package=tree||msg="Issue created successfully" target=FuzzBuildTree package=tree'
-)
-
+# Ensure for each fuzz target: exactly one of "Issue created" or "Issue already exists" exists,
+# and "Crash still reproducible" appears only with "Issue already exists".
 echo "Verifying required issue-related log entries in ${GCF_LOG}..."
-for group in "${REQUIRED_PATTERN_GROUPS[@]}"; do
-  IFS='||' read -r pattern1 pattern2 <<<"$group"
-  if ! grep -q -- "${pattern1}" "${GCF_LOG}" && ! grep -q -- "${pattern2}" "${GCF_LOG}"; then
-    echo "❌ ERROR: Neither of the expected log entries found:"
-    echo "  -> ${pattern1}"
-    echo "  -> ${pattern2}"
+for target in "${CRASHING_FUZZ_TARGETS[@]}"; do
+  IFS=':' read -r package target <<<"${target}"
+
+  crash_msg="msg=\"Crash still reproducible; keeping GitHub issue open\" target=${target} package=${package}"
+  created_msg="msg=\"Issue created successfully\" target=${target} package=${package}"
+  exists_msg="msg=\"Issue already exists\" target=${target} package=${package}"
+
+  crash_exists=$(grep -q -- "${crash_msg}" "${GCF_LOG}" && echo true || echo false)
+  created_exists=$(grep -q -- "${created_msg}" "${GCF_LOG}" && echo true || echo false)
+  exists_exists=$(grep -q -- "${exists_msg}" "${GCF_LOG}" && echo true || echo false)
+
+  # Validate issue logs and reproducibility
+  if [ "${created_exists}" = "${exists_exists}" ]; then
+    echo "❌ ERROR: Exactly one of 'Issue already exists' or 'Issue created successfully' must exist for target=${target} package=${package}"
+    exit 1
+  fi
+
+  if ${exists_exists} && ! ${crash_exists}; then
+    echo "❌ ERROR: 'Issue already exists' present but no corresponding reproducibility log for target=${target} package=${package}"
+    exit 1
+  fi
+
+  if ${created_exists} && ${crash_exists}; then
+    echo "❌ ERROR: 'Issue created successfully' exists but reproducibility log also present for target=${target} package=${package}"
     exit 1
   fi
 done
@@ -272,11 +294,15 @@ done
 # List of patterns that should NOT be present in the log
 readonly FORBIDDEN_PATTERNS=(
   'level=ERROR'
-  'msg="Worker starting fuzz target" workerID=4'
+  'msg="Worker starting fuzzing" workerID=4'
+  'msg="Worker starting issue verification" workerID=4'
   'Cycle duration complete; initiating cleanup.'
   'Corpus object not found. Starting with empty corpus.'
   'warning: starting with empty corpus'
   'Shutdown initiated during fuzzing cycle; performing final cleanup.'
+  'Crash no longer reproducible; closing associated GitHub issue'
+  'No failing testcase found in body; skipping issue, possibly an unrelated issue with a similar title'
+  'Seed corpus crash detected; manual verification required'
 )
 
 # Verify that worker logs do not contain forbidden entries

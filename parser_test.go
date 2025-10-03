@@ -137,3 +137,51 @@ func TestReadInputData(t *testing.T) {
 		})
 	}
 }
+
+// TestParseIssueBody verifies that parseIssueBody correctly extracts valid
+// failing inputs and handles missing sections from issue body.
+func TestParseIssueBody(t *testing.T) {
+	tests := []struct {
+		name          string
+		body          string
+		expectedInput string
+		expectErrMsg  string
+	}{
+		{
+			name: "valid section with input",
+			body: "## Error logs\n## Failing " +
+				"testcase\n~~~sh\ngo test fuzz v1" +
+				"\nstring(\"0\")\n\n~~~\n" + waterMark + "\n",
+			expectedInput: "go test fuzz v1\nstring(\"0\")\n",
+			expectErrMsg:  "",
+		},
+		{
+			name: "valid section with seed input",
+			body: "## Error logs\n## Failing " +
+				"testcase\n~~~sh\n" + seedCorpusErrMsg +
+				"\n~~~\n" + waterMark + "\n",
+			expectedInput: seedCorpusErrMsg,
+			expectErrMsg:  "",
+		},
+		{
+			name:          "missing section",
+			body:          "No failing testcase section",
+			expectedInput: "",
+			expectErrMsg:  "failing testcase section not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseIssueBody(tt.body)
+			if tt.expectErrMsg != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectErrMsg)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedInput, got)
+		})
+	}
+}

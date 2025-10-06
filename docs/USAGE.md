@@ -29,6 +29,7 @@ For `fuzz.crash-repo`:
 
 Note: The authentication token is used to open issues on GitHub whenever a crash is detected.
 In short, issues will be created from the GitHub account associated with the provided authentication token.
+Similar behavior is followed when closing issues.
 
 **AWS S3 Storage Guidelines**
 
@@ -108,6 +109,9 @@ The file structure of the coverage reports is as follows:
 
 7. **Coprus Minimization:**
    To prevent the corpus from becoming bloated over time, it is periodically minimized after every `fuzz.corpus-minimize-interval` where each input is evaluated and those that do not improve or reduce overall coverage are removed.
+
+8. **Automatic Issue Closure:**
+   For each fuzz target, GitHub issues will be automatically closed if the crash is no longer reproducible, indicating that the issue has been resolved.
 
 ## Running go-continuous-fuzz
 

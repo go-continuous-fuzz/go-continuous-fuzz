@@ -223,6 +223,22 @@ func parseFailureLine(line string) (string, string) {
 	return target, id
 }
 
+// parseIssueBody extracts and returns the content of the "## Failing testcase"
+// section from the issue body. This section contains the input that caused a
+// crash in the given fuzz target.
+func parseIssueBody(body string) (string, error) {
+	// failingInputRegex matches an issue body and captures the text inside
+	// the "## Failing testcase" section.
+	failingInputRegex := regexp.MustCompile(
+		`(?s)## Failing testcase\n~~~sh\n(.*?)\n~~~`)
+	match := failingInputRegex.FindStringSubmatch(body)
+	if len(match) < 2 {
+		return "", fmt.Errorf("failing testcase section not found")
+	}
+
+	return match[1], nil
+}
+
 // readFailingInput attempts to read the failing input file from the corpus
 // directory.Returns the file contents or error if reading fails.
 func (fp *fuzzOutputProcessor) readFailingInput(target, id string) (string,

@@ -249,6 +249,18 @@ func MinimizeCorpus(ctx context.Context, logger *slog.Logger, pkgDir, corpusDir,
 func calculateFuzzAddInputs(ctx context.Context, logger *slog.Logger, pkgDir,
 	corpusDir, target string) (int, error) {
 
+	// Count existing corpus files for this target.
+	corpusFileCount := 0
+	corpusTargetDir := filepath.Join(corpusDir, target)
+	files, err := os.ReadDir(corpusTargetDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return 0, fmt.Errorf("reading corpus dir: %w", err)
+		}
+	} else {
+		corpusFileCount = len(files)
+	}
+
 	// Run the fuzz target once to collect baseline inputs.
 	output, err := runFuzzTest(ctx, pkgDir, corpusDir, target, 1)
 	if err != nil {
@@ -270,18 +282,6 @@ func calculateFuzzAddInputs(ctx context.Context, logger *slog.Logger, pkgDir,
 	totalBaselineInputs, err := strconv.Atoi(matches[1])
 	if err != nil {
 		return 0, fmt.Errorf("parsing baseline inputs: %w", err)
-	}
-
-	// Count existing corpus files for this target.
-	corpusFileCount := 0
-	corpusTargetDir := filepath.Join(corpusDir, target)
-	files, err := os.ReadDir(corpusTargetDir)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return 0, fmt.Errorf("reading corpus dir: %w", err)
-		}
-	} else {
-		corpusFileCount = len(files)
 	}
 
 	// Inputs from f.Add() = total baseline inputs - existing corpus files

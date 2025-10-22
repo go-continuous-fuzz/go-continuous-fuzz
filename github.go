@@ -309,7 +309,12 @@ func (gh *GitHubRepo) reproduceIssue(pkg, target string, testCmd []string,
 		return fmt.Errorf("failed to start verification container "+
 			"for %s/%s: %w", pkg, target, err)
 	}
-	defer c.Stop(containerID)
+	defer func() {
+		if err := c.Stop(containerID); err != nil {
+			gh.logger.Error("Failed to stop container", "error",
+				err, "containerID", containerID)
+		}
+	}()
 
 	// After running the fuzzing container for this issue, if it crashes
 	// again (Wait returns an error), the crash is still reproducible and

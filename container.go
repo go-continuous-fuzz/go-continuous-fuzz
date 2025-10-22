@@ -160,12 +160,12 @@ func (c *Container) Wait(ID string) error {
 
 // Stop attempts to gracefully stop the specified Docker container by its ID.
 // After a default timeout of 10 seconds, the container is forcefully killed.
-func (c *Container) Stop(ID string) {
+func (c *Container) Stop(ID string) error {
 	if err := c.cli.ContainerStop(context.Background(), ID,
 		container.StopOptions{}); err != nil {
 		if !strings.Contains(err.Error(), "No such container") {
-			c.logger.Error("Failed to stop container", "error", err,
-				"containerID", ID)
+			return err
 		}
 	}
+	return nil
 }

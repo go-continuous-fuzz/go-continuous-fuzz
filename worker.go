@@ -219,7 +219,17 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string,
 		}
 		return fmt.Errorf("error while starting container: %w", err)
 	}
-	defer c.Stop(containerID)
+
+	// Stopping the container here is both safe and necessary. In case of
+	// any error, we can ensure that the fuzzing container is stopped. If
+	// there is no error, it means the fuzz timed out and the container has
+	// already stopped, so this call won't cause any issues anyway.
+	defer func() {
+		if err := c.Stop(containerID); err != nil {
+			wg.logger.Error("Failed to stop container", "error",
+				err, "containerID", containerID)
+		}
+	}()
 
 	// Channels to receive either a fuzz failure or a container error.
 	fuzzCrashChan := make(chan fuzzCrash, 1)
@@ -244,6 +254,12 @@ func (wg *WorkerGroup) executeFuzzTarget(pkg string, target string,
 		if err := gh.handleCrash(pkg, target, fuzzCrash); err != nil {
 			return fmt.Errorf("handling fuzz crash: %w", err)
 		}
+	}
+
+	// Now stop the fuzz container.
+	if err := c.Stop(containerID); err != nil {
+		return fmt.Errorf("failed to stop container %s after fuzzing: "+
+			"%w", containerID, err)
 	}
 
 	wg.logger.Info("Fuzzing in Docker completed successfully", "package",

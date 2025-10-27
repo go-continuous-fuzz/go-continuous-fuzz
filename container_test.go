@@ -61,7 +61,7 @@ func TestContainerRace(t *testing.T) {
 
 			id, err := c.Start()
 			assert.NoError(t, err)
-			defer c.Stop(id)
+			t.Cleanup(func() { assert.NoError(t, c.Stop(id)) })
 
 			errorChan := make(chan error, 1)
 
